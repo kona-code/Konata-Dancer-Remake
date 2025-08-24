@@ -1,99 +1,54 @@
-#
-# 'make'        build executable file 'main'
-# 'make clean'  removes all .o and executable files
-#
+# --- toolchain -----------------------------------------------------
+CXX       := g++
+PKG_CONFIG:= pkg-config
 
-# define the Cpp compiler to use
-CXX = g++
+# --- flags ---------------------------------------------------------
+CXXFLAGS  := $(shell $(PKG_CONFIG) --cflags sdl2 gtk+-3.0 appindicator3-0.1)
+CXXFLAGS += -Iinclude -I/usr/include/glib-2.0 -I/usr/include/gtk-3.0
 
-# define any compile-time flags
-CXXFLAGS	:= -std=c++17 -Wall -Wextra -g
+LDFLAGS   := $(shell $(PKG_CONFIG) --libs sdl2 gtk+-3.0 appindicator3-0.1)
+LDFLAGS  +=  -limgui -lvulkan
 
-# define library paths in addition to /usr/lib
-#   if I wanted to include libraries not in /usr/lib I'd specify
-#   their path using -Lpath, something like:
-LFLAGS =
+# --- directories ---------------------------------------------------
+SRCDIR     := src
+OBJDIR     := obj
+BINDIR     := output
 
-# define output directory
-OUTPUT	:= output
+# --- sources -------------------------------------------------------
+SRC_FILES     := $(wildcard $(SRCDIR)/*.cpp)
+SOURCES       := $(SRC_FILES)
 
-# define source directory
-SRC		:= src
+OBJECTS       := $(patsubst %.cpp,$(OBJDIR)/%.o,$(notdir $(SOURCES)))
+TARGET        := $(BINDIR)/main
 
-# define include directory
-INCLUDE	:= include
+# --- default rule --------------------------------------------------
+.PHONY: all
+all: $(TARGET)
 
-# define lib directory
-LIB		:= lib
+# --- linking -------------------------------------------------------
+$(TARGET): $(OBJECTS) | $(BINDIR)
+	@echo "Linking $@"
+	$(CXX) $(addprefix $(OBJDIR)/,$(notdir $(OBJECTS))) -o $@ $(LDFLAGS)
 
-ifeq ($(OS),Windows_NT)
-MAIN	:= main.exe
-SOURCEDIRS	:= $(SRC)
-INCLUDEDIRS	:= $(INCLUDE)
-LIBDIRS		:= $(LIB)
-FIXPATH = $(subst /,\,$1)
-RM			:= del /q /f
-MD	:= mkdir
-else
-MAIN	:= main
-SOURCEDIRS	:= $(shell find $(SRC) -type d)
-INCLUDEDIRS	:= $(shell find $(INCLUDE) -type d)
-LIBDIRS		:= $(shell find $(LIB) -type d)
-FIXPATH = $1
-RM = rm -f
-MD	:= mkdir -p
-endif
+# --- compilation ---------------------------------------------------
+# from src/
+$(OBJDIR)/%.o: $(SRCDIR)/%.cpp | $(OBJDIR)
+	@echo "Compiling $<"
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# define any directories containing header files other than /usr/include
-INCLUDES	:= $(patsubst %,-I%, $(INCLUDEDIRS:%/=%))
+# --- dirs ----------------------------------------------------------
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
 
-# define the C libs
-LIBS		:= $(patsubst %,-L%, $(LIBDIRS:%/=%))
+$(BINDIR):
+	mkdir -p $(BINDIR)
 
-# define the C source files
-SOURCES		:= $(wildcard $(patsubst %,%/*.cpp, $(SOURCEDIRS)))
-
-# define the C object files
-OBJECTS		:= $(SOURCES:.cpp=.o)
-
-# define the dependency output files
-DEPS		:= $(OBJECTS:.o=.d)
-
-#
-# The following part of the makefile is generic; it can be used to
-# build any executable just by changing the definitions above and by
-# deleting dependencies appended to the file from 'make depend'
-#
-
-OUTPUTMAIN	:= $(call FIXPATH,$(OUTPUT)/$(MAIN))
-
-all: $(OUTPUT) $(MAIN)
-	@echo Executing 'all' complete!
-
-$(OUTPUT):
-	$(MD) $(OUTPUT)
-
-$(MAIN): $(OBJECTS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(OUTPUTMAIN) $(OBJECTS) $(LFLAGS) $(LIBS)
-
-# include all .d files
--include $(DEPS)
-
-# this is a suffix replacement rule for building .o's and .d's from .c's
-# it uses automatic variables $<: the name of the prerequisite of
-# the rule(a .c file) and $@: the name of the target of the rule (a .o file)
-# -MMD generates dependency output files same name as the .o file
-# (see the gnu make manual section about automatic variables)
-.cpp.o:
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c -MMD $<  -o $@
+# --- utils ---------------------------------------------------------
+.PHONY: run
+run: all
+	@echo "Running $(TARGET)"
+	$(TARGET)
 
 .PHONY: clean
 clean:
-	$(RM) $(OUTPUTMAIN)
-	$(RM) $(call FIXPATH,$(OBJECTS))
-	$(RM) $(call FIXPATH,$(DEPS))
-	@echo Cleanup complete!
-
-run: all
-	./$(OUTPUTMAIN)
-	@echo Executing 'run: all' complete!
+	rm -rf $(OBJDIR) $(BINDIR)
