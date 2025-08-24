@@ -17,6 +17,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <thread>
+#include <vector>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
 #include <array> // for ImVec4 conversion
@@ -27,6 +28,7 @@
 #include <chrono>
 #include <algorithm>
 #include <string>
+
 extern "C" {
 #include "gifdec.h" // from https://github.com/lecram/gifdec
 }
@@ -692,8 +694,8 @@ void Interface::Show() {
     g_RenderPaused.store(false, std::memory_order_release);
 }
 
-uint32_t findTextureMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties)
-{
+uint32_t findTextureMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties) {
+
     VkPhysicalDeviceMemoryProperties mem_properties;
     vkGetPhysicalDeviceMemoryProperties(g_PhysicalDevice, &mem_properties);
 
@@ -897,6 +899,172 @@ static bool LoadTextureFromFile(const char* filename, TextureData* tex_data) {
     return true;
 }
 
+
+bool LoadTextureFromMemoryRGBA(const uint8_t* pixels, int width, int height, TextureData* out) {
+    // create image
+    out->width = width;
+    out->height = height;
+    out->Channels = 4;
+    size_t image_size = (size_t)width * (size_t)height * 4;
+
+    VkResult err;
+    // image
+    VkImageCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    info.extent.width = (uint32_t)width;
+    info.extent.height = (uint32_t)height;
+    info.extent.depth = 1;
+    info.mipLevels = 1;
+    info.arrayLayers = 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    err = vkCreateImage(g_Device, &info, g_Allocator, &out->Image);
+    check_vk_result(err);
+
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(g_Device, out->Image, &req);
+    VkMemoryAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = req.size;
+    alloc_info.memoryTypeIndex = findTextureMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    err = vkAllocateMemory(g_Device, &alloc_info, g_Allocator, &out->ImageMemory);
+    check_vk_result(err);
+    err = vkBindImageMemory(g_Device, out->Image, out->ImageMemory, 0);
+    check_vk_result(err);
+
+    // image view
+    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    viewInfo.image = out->Image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+    err = vkCreateImageView(g_Device, &viewInfo, g_Allocator, &out->ImageView);
+    check_vk_result(err);
+
+    // sampler
+    VkSamplerCreateInfo sampler_info{};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter = VK_FILTER_LINEAR;
+    sampler_info.minFilter = VK_FILTER_LINEAR;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.minLod = 0.0f;
+    sampler_info.maxLod = 0.0f;
+    sampler_info.maxAnisotropy = 1.0f;
+    err = vkCreateSampler(g_Device, &sampler_info, g_Allocator, &out->Sampler);
+    check_vk_result(err);
+
+    // descriptor
+    out->DS = ImGui_ImplVulkan_AddTexture(out->Sampler, out->ImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    // create upload buffer
+    VkBufferCreateInfo buffer_info = {};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = image_size;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    err = vkCreateBuffer(g_Device, &buffer_info, g_Allocator, &out->UploadBuffer);
+    check_vk_result(err);
+    vkGetBufferMemoryRequirements(g_Device, out->UploadBuffer, &req);
+    VkMemoryAllocateInfo buf_alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    buf_alloc.allocationSize = req.size;
+    buf_alloc.memoryTypeIndex = findTextureMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    err = vkAllocateMemory(g_Device, &buf_alloc, g_Allocator, &out->UploadBufferMemory);
+    check_vk_result(err);
+    err = vkBindBufferMemory(g_Device, out->UploadBuffer, out->UploadBufferMemory, 0);
+    check_vk_result(err);
+
+    // copy pixels into mapped staging buffer
+    void* mapped = nullptr;
+    err = vkMapMemory(g_Device, out->UploadBufferMemory, 0, image_size, 0, &mapped);
+    check_vk_result(err);
+    memcpy(mapped, pixels, image_size);
+    vkUnmapMemory(g_Device, out->UploadBufferMemory);
+
+    // copy buffer -> image with a command buffer
+    VkCommandBuffer cmd;
+    {
+        VkCommandBufferAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandPool = g_MainWindowData.Frames[g_MainWindowData.FrameIndex].CommandPool;
+        alloc_info.commandBufferCount = 1;
+        err = vkAllocateCommandBuffers(g_Device, &alloc_info, &cmd);
+        check_vk_result(err);
+        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        err = vkBeginCommandBuffer(cmd, &bi);
+        check_vk_result(err);
+    }
+
+    // transition -> transfer dst
+    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = out->Image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // copy
+    VkBufferImageCopy region = {};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = { 0, 0, 0 };
+    region.imageExtent = { (uint32_t)width, (uint32_t)height, 1 };
+    vkCmdCopyBufferToImage(cmd, out->UploadBuffer, out->Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    // transition -> shader read
+    VkImageMemoryBarrier use_barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    use_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    use_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    use_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    use_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    use_barrier.image = out->Image;
+    use_barrier.subresourceRange = barrier.subresourceRange;
+    use_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    use_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &use_barrier);
+
+    // submit & wait
+    err = vkEndCommandBuffer(cmd);
+    check_vk_result(err);
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
+    err = vkQueueSubmit(g_Queue, 1, &si, VK_NULL_HANDLE);
+    check_vk_result(err);
+    err = vkQueueWaitIdle(g_Queue);
+    check_vk_result(err);
+
+    // free temporary command buffer
+    vkFreeCommandBuffers(g_Device, g_MainWindowData.Frames[g_MainWindowData.FrameIndex].CommandPool, 1, &cmd);
+
+    return true;
+}
+
 void RemoveTexture(TextureData* tex_data) {
     vkFreeMemory(g_Device, tex_data->UploadBufferMemory, nullptr);
     vkDestroyBuffer(g_Device, tex_data->UploadBuffer, nullptr);
@@ -905,6 +1073,62 @@ void RemoveTexture(TextureData* tex_data) {
     vkDestroyImage(g_Device, tex_data->Image, nullptr);
     vkFreeMemory(g_Device, tex_data->ImageMemory, nullptr);
     ImGui_ImplVulkan_RemoveTexture(tex_data->DS);
+}
+
+bool LoadGifAsFrames(const char* gif_path, std::vector<GifFrame>& out_frames) {
+    gd_GIF *gif = gd_open_gif(gif_path);
+    if (!gif) return false;
+
+    // allocate rgb canvas
+    const int canvas_w = gif->width;
+    const int canvas_h = gif->height;
+    std::vector<uint8_t> rgbbuf((size_t)canvas_w * canvas_h * 3);
+
+    // iterate all frames
+    for (;;) {
+        int ret = gd_get_frame(gif);
+        if (ret == 0) break; // no more frames
+        // render full canvas (rgb)
+        gd_render_frame(gif, rgbbuf.data()); // writes width*height*3 bytes
+
+        // convert rgb -> rgba
+        std::vector<uint8_t> rgbato((size_t)canvas_w * canvas_h * 4);
+        uint8_t* in = rgbbuf.data();
+        uint8_t* out = rgbato.data();
+        for (int y = 0; y < canvas_h; ++y) {
+            for (int x = 0; x < canvas_w; ++x) {
+                // color pointer for pixel
+                uint8_t r = *in++;
+                uint8_t g = *in++;
+                uint8_t b = *in++;
+                uint8_t a = 255;
+                
+                if (gd_is_bgcolor(gif, (uint8_t[]){r,g,b}) ) { // note: prepare temporary array
+                    a = 0;
+                }
+                *out++ = r;
+                *out++ = g;
+                *out++ = b;
+                *out++ = a;
+            }
+        }
+
+        // upload
+        GifFrame gf{};
+        gf.delay_ms = (gif->gce.delay > 0) ? (gif->gce.delay * 10) : 100; // gifdec stores hundredths
+        if (!LoadTextureFromMemoryRGBA(rgbato.data(), canvas_w, canvas_h, &gf.tex)) {
+            // cleanup previous frames
+            for (auto &f : out_frames) RemoveTexture(&f.tex);
+            gd_close_gif(gif);
+            return false;
+        }
+
+        out_frames.push_back(std::move(gf));
+    }
+
+    // detect loop count
+    gd_close_gif(gif);
+    return !out_frames.empty();
 }
 
 static int ResizeCallback(ImGuiInputTextCallbackData* data) { // for string usage inside ImGui::InputText()
@@ -918,15 +1142,11 @@ static int ResizeCallback(ImGuiInputTextCallbackData* data) { // for string usag
 }
 
 int Interface::Render(std::atomic<bool>* runningFlag) {
-    // configuration path
-    char config_path[PATH_MAX];
-    char image_path[PATH_MAX];
-    snprintf(config_path, sizeof(config_path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/config.ini");
-    snprintf(image_path, sizeof(image_path), "%s/%s", getenv("HOME"), ".config/konacode/konamask/background");
+
     // create window with Vulkan graphics context
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    window = SDL_CreateWindow("konamask", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
+    window = SDL_CreateWindow("Konata Dancer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
     if (window == nullptr) {
         printf("[ERROR] (Vulkan/SDL2) SDL_CreateWindow(): %s\n", SDL_GetError());
         return -1;
@@ -1054,11 +1274,28 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
     // konata's texture data
     TextureData texture;
-    std::string out_path;
+    std::vector<GifFrame> gif_frames;
+    size_t gif_cur = 0;
+    int gif_accum_ms = 0;
+    uint64_t last_tick = SDL_GetTicks64();
+
+    if (!LoadGifAsFrames("./konata.gif", gif_frames)) { // temporary path
+        // fallback - keep texture empty or load single frame
+        std::cerr << "[ERROR] Failed to load gif frames!" << std::endl;
+    } else {
+        if (!gif_frames.empty()) {
+            texture = gif_frames[0].tex; // copies handle values
+        }
+    }
+
     SDL_Event event;
     int fb_width, fb_height;
     while (runningFlag->load()) {
-        
+        uint64_t now_tick = SDL_GetTicks64();
+        int dt_ms = (int)(now_tick - last_tick);
+        last_tick = now_tick;
+        dt_ms = std::min(dt_ms, 1000);
+
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT)
@@ -1083,13 +1320,23 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             g_SwapChainRebuild = false;
         }
 
+        gif_accum_ms += dt_ms;
+        if (!gif_frames.empty()) {
+            int cur_delay = gif_frames[gif_cur].delay_ms;
+            if (cur_delay <= 0) cur_delay = 100;
+            while (gif_accum_ms >= cur_delay) {
+                gif_accum_ms -= cur_delay;
+                gif_cur = (gif_cur + 1) % gif_frames.size();
+                cur_delay = gif_frames[gif_cur].delay_ms;
+                // update drawable texture to point to new descriptor set
+                texture = gif_frames[gif_cur].tex; // shallow copy of handles is ok
+            }
+        }
+        
         // start the ImGui frame
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
-
-
-
 
         {
             
@@ -1222,6 +1469,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
 
     // cleanup
+    for (auto &f : gif_frames) {
+        RemoveTexture(&f.tex); // clean GIF frames
+    }
+    gif_frames.clear();
     if (!Shutdown(surface)) {
         std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
     }
