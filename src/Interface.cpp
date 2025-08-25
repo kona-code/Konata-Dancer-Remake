@@ -20,8 +20,8 @@
 #include <vector>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
-#include <array> // for ImVec4 conversion
-#include <limits.h> // for config.ini path
+#include <array>
+#include <limits.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h> // for texture (image) loading
 #include <sys/stat.h>
@@ -47,7 +47,6 @@ extern "C" {
 #define APP_USE_VULKAN_DEBUG_REPORT
 static VkDebugReportCallbackEXT g_DebugReport = VK_NULL_HANDLE;
 #endif
-
 
 static VkAllocationCallbacks*   g_Allocator = nullptr;
 static VkInstance               g_Instance = VK_NULL_HANDLE;
@@ -239,6 +238,28 @@ static bool IsExtensionAvailable(const ImVector<VkExtensionProperties>& properti
     return false;
 }
 
+static bool IsLayerAvailable(const char* layer_name) {
+    uint32_t layer_count = 0;
+    vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+    std::vector<VkLayerProperties> layers(layer_count);
+    if (layer_count)
+        vkEnumerateInstanceLayerProperties(&layer_count, layers.data());
+    for (auto &lp : layers)
+        if (strcmp(lp.layerName, layer_name) == 0) return true;
+    return false;
+}
+
+static bool IsInstanceExtensionAvailable(const char* extension) {
+    uint32_t ext_count = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, nullptr);
+    std::vector<VkExtensionProperties> exts(ext_count);
+    if (ext_count)
+        vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data());
+    for (auto &e : exts)
+        if (strcmp(e.extensionName, extension) == 0) return true;
+    return false;
+}
+
 static void VkSetup(ImVector<const char*> instance_extensions) {
     VkResult err;
 #ifdef IMGUI_IMPL_VULKAN_USE_VOLK
@@ -279,6 +300,16 @@ volkInitialize();
 #ifdef IMGUI_IMPL_VULKAN_USE_VOLK
         volkLoadInstance(g_Instance);
 #endif
+
+    if (IsInstanceExtensionAvailable(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
+        instance_extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+
+#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+    if (IsInstanceExtensionAvailable(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+        instance_extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    }
+#endif
+
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
         auto f_vkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkCreateDebugReportCallbackEXT");
@@ -337,8 +368,19 @@ volkInitialize();
 
     // descriptor pool
     {
+        // keep manual - avoid "out of pool" errors
         VkDescriptorPoolSize pool_sizes[] = {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE },
+            { VK_DESCRIPTOR_TYPE_SAMPLER,                1000 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,   1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,   1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,       1000 }
         };
         VkDescriptorPoolCreateInfo pool_info = {};
         pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
