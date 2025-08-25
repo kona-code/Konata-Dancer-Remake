@@ -406,6 +406,8 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
         std::cout << "\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) No WSI support on physical device 0" << std::endl;
         exit(-1);
     }
+    VkSurfaceCapabilitiesKHR surfCaps;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface, &surfCaps);
 
     // select surface format
     const VkFormat requestSurfaceImageFormat[] = { VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8_UNORM, VK_FORMAT_R8G8B8_UNORM };
@@ -423,6 +425,10 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
 
     IM_ASSERT(g_MinImageCount >= 2);
     ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, width, height, g_MinImageCount);
+    wd->ClearValue.color.float32[0] = 0.0f;
+    wd->ClearValue.color.float32[1] = 0.0f;
+    wd->ClearValue.color.float32[2] = 0.0f;
+    wd->ClearValue.color.float32[3] = 0.0f;
 }
 
 static void VkCleanup() {
@@ -1505,6 +1511,10 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
         if (!is_minimized)
         {
+            VkSurfaceCapabilitiesKHR caps;
+vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface, &caps);
+printf("[vulkan] supportedCompositeAlpha = 0x%x, chosen format = %d\n", caps.supportedCompositeAlpha, wd->SurfaceFormat.format);
+
             FrameRender(wd, draw_data);
             FramePresent(wd);
         }
