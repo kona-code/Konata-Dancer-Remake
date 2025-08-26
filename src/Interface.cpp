@@ -15,6 +15,7 @@
 #include <linux/limits.h>
 #include <stdlib.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_shape.h>
 #include <SDL2/SDL_vulkan.h>
 #include <thread>
 #include <vector>
@@ -85,7 +86,10 @@ struct TextureData {
 struct GifFrame {
     TextureData tex;
     int delay_ms;
+    std::vector<uint8_t> rgba;
 };
+
+TextureData texture; // store konata's texture data
 
 static void check_vk_result(VkResult err) {
     if (err == VK_SUCCESS) 
@@ -406,8 +410,8 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
         std::cout << "\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) No WSI support on physical device 0" << std::endl;
         exit(-1);
     }
-    VkSurfaceCapabilitiesKHR surfCaps;
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface, &surfCaps);
+    // VkSurfaceCapabilitiesKHR surfCaps;
+    // vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface, &surfCaps);
 
     // select surface format
     const VkFormat requestSurfaceImageFormat[] = { VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8_UNORM, VK_FORMAT_R8G8B8_UNORM };
@@ -425,10 +429,16 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
 
     IM_ASSERT(g_MinImageCount >= 2);
     ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, width, height, g_MinImageCount);
-    wd->ClearValue.color.float32[0] = 0.0f;
-    wd->ClearValue.color.float32[1] = 0.0f;
-    wd->ClearValue.color.float32[2] = 0.0f;
-    wd->ClearValue.color.float32[3] = 0.0f;
+    wd->ClearValue.color.float32[0] = 0.03f; // r
+    wd->ClearValue.color.float32[1] = 0.03f; // g
+    wd->ClearValue.color.float32[2] = 0.03f; // b
+    wd->ClearValue.color.float32[3] = 0.0f;  // a (transparency)
+
+    // debug output
+    VkSurfaceCapabilitiesKHR caps; 
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface, &caps);
+    std::cout << "[INFO] (Vulkan) surfaceFormat = " << wd->SurfaceFormat.format <<", supportedCompositeAlpha = " << caps.supportedCompositeAlpha << std::endl;
+
 }
 
 static void VkCleanup() {
@@ -1189,15 +1199,161 @@ static int ResizeCallback(ImGuiInputTextCallbackData* data) { // for string usag
     return 0;
 }
 
+static bool IsRunningWayland() {
+    const char* xdg = getenv("XDG_SESSION_TYPE");
+    if (xdg && strcmp(xdg, "wayland") == 0) return true;
+    if (getenv("WAYLAND_DISPLAY")) return true;
+    return false;
+}
+
+void UpdateWindowShapeFromRGBA(SDL_Window* win, const uint8_t* pixels, int width, int height, uint8_t alphaThreshold = 1) {
+    if (!win) return;
+    if (!pixels) {
+        std::cerr << "[ERROR] UpdateWindowShapeFromRGBA: pixels == nullptr" << std::endl;
+        return;
+    }
+    // check shaped-window support for this window
+    if (!SDL_IsShapedWindow(win)) {
+        return;
+    }
+    // create an SDL surface
+    SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32);
+    if (!surf) {
+        std::cerr << "[ERROR] SDL_CreateRGBSurfaceWithFormat failed: \n[ERROR] " << SDL_GetError() << std::endl;
+        return;
+    }
+    // copy incoming rgba pixels into the surface
+    if (SDL_LockSurface(surf) != 0) {
+        std::cerr << "[ERROR] SDL_LockSurface failed: \n[ERROR]" << SDL_GetError() << std::endl;
+        SDL_FreeSurface(surf);
+        return;
+    }
+
+    // pitch is surf->pitch bytes per row, data packed width*4
+    // copy row-by-row in case pitch != width*4
+    const int src_pitch = width * 4;
+    uint8_t* dst = (uint8_t*)surf->pixels;
+    const uint8_t* src = pixels;
+    for (int y = 0; y < height; ++y) {
+        memcpy(dst + (size_t)y * surf->pitch, src + (size_t)y * src_pitch, (size_t)src_pitch);
+    }
+
+    SDL_UnlockSurface(surf);
+    SDL_WindowShapeMode shapeMode;
+    shapeMode.mode = ShapeModeBinarizeAlpha;
+    shapeMode.parameters.binarizationCutoff = alphaThreshold;
+
+    if (SDL_SetWindowShape(win, surf, &shapeMode) != 0) {
+        fprintf(stderr, "[WARN] SDL_SetWindowShape failed: %s\n", SDL_GetError());
+    }
+
+    SDL_FreeSurface(surf);
+}
+
+static void CopyPremultipliedToStagingAndUpload(const uint8_t* pixels, size_t image_size,
+                                                VkDeviceMemory stagingMemory, VkDevice device) {
+
+    // create temporary buffer with premultiplied pixels
+    uint8_t* prem = (uint8_t*)malloc(image_size);
+    if (!prem) {
+        std::cerr << "[ERROR] Ran out of memory for premultiplied buffer!" << std::endl;
+        return;
+    }
+
+    // premultiply r = (r * a) / 255
+    for (size_t i = 0; i < image_size; i += 4) {
+        uint8_t r = pixels[i + 0];
+        uint8_t g = pixels[i + 1];
+        uint8_t b = pixels[i + 2];
+        uint8_t a = pixels[i + 3];
+        // if alpha is 255 just copy
+        if (a == 255) {
+            prem[i + 0] = r;
+            prem[i + 1] = g;
+            prem[i + 2] = b;
+            prem[i + 3] = 255;
+        } else if (a == 0) {
+            prem[i + 0] = 0;
+            prem[i + 1] = 0;
+            prem[i + 2] = 0;
+            prem[i + 3] = 0;
+        } else {
+            // multiply with rounding (v*a + 127) / 255
+            prem[i + 0] = (uint8_t)((((int)r * (int)a) + 127) / 255);
+            prem[i + 1] = (uint8_t)((((int)g * (int)a) + 127) / 255);
+            prem[i + 2] = (uint8_t)((((int)b * (int)a) + 127) / 255);
+            prem[i + 3] = a;
+        }
+    }
+
+    // map & copy premultiplied data into staging memory
+    void* map = nullptr;
+    VkResult err = vkMapMemory(device, stagingMemory, 0, image_size, 0, &map);
+    if (err == VK_SUCCESS && map) {
+        memcpy(map, prem, image_size);
+        VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
+        range.memory = stagingMemory;
+        range.size = image_size;
+        vkFlushMappedMemoryRanges(device, 1, &range);
+        vkUnmapMemory(device, stagingMemory);
+    } else {
+        std::cerr << "[ERROR] vkMapMemory failed while uploading premultiplied pixels:\n[ERROR] " << err << std::endl;
+    }
+
+    free(prem);
+}
+
+static void premultiply_rgba8(const uint8_t* src, uint8_t* out, size_t pixels_count) { // for wayland sessions
+    // pixels_count = w*h
+    for (size_t i = 0; i < pixels_count; ++i) {
+        const uint8_t r = src[i*4+0];
+        const uint8_t g = src[i*4+1];
+        const uint8_t b = src[i*4+2];
+        const uint8_t a = src[i*4+3];
+        if (a == 255) {
+            out[i*4+0] = r;
+            out[i*4+1] = g;
+            out[i*4+2] = b;
+            out[i*4+3] = 255;
+        } else if (a == 0) {
+            out[i*4+0] = 0;
+            out[i*4+1] = 0;
+            out[i*4+2] = 0;
+            out[i*4+3] = 0;
+        } else {
+            // integer-rounded multiply
+            out[i*4+0] = (uint8_t)((((int)r * (int)a) + 127) / 255);
+            out[i*4+1] = (uint8_t)((((int)g * (int)a) + 127) / 255);
+            out[i*4+2] = (uint8_t)((((int)b * (int)a) + 127) / 255);
+            out[i*4+3] = a;
+        }
+    }
+}
+
 int Interface::Render(std::atomic<bool>* runningFlag) {
+
 
     // create window with Vulkan graphics context
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
-    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    window = SDL_CreateWindow("Konata Dancer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, (int)(1280 * main_scale), (int)(720 * main_scale), window_flags);
-    if (window == nullptr) {
-        printf("[ERROR] (Vulkan/SDL2) SDL_CreateWindow(): %s\n", SDL_GetError());
-        return -1;
+    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS);
+    if (!IsRunningWayland()) {
+        window = SDL_CreateShapedWindow("Konata Dancer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, window_flags);
+        if (window == nullptr) {
+            std::cerr << "[ERROR] SDL_CreateShapedWindow failed: " << SDL_GetError() << "\n[INFO] Falling back to normal SDL_CreateWindow()" << std::endl;
+            window = SDL_CreateWindow("Konata Dancer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, window_flags);
+            if (window == nullptr) {
+                std::cerr << "[ERROR] (Vulkan/SDL2) SDL_CreateWindow():\n" << SDL_GetError() << std::endl;
+                return -1;
+            }
+        }
+    }
+    else {
+        std::cout << "[INFO] Renderer will use SDL_CreateWindow() over SDL_CreateShapedWindow() due to Wayland compatibility!" << std::endl;
+        window = SDL_CreateWindow("Konata Dancer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, window_flags);
+        if (window == nullptr) {
+            std::cerr << "[ERROR] (Vulkan/SDL2) SDL_CreateWindow():\n" << SDL_GetError() << std::endl;
+            return -1;
+        }
     }
     std::cout << "[INFO] (Vulkan/SDL2) Window created successfully!" << std::endl;
 
@@ -1319,21 +1475,28 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
 
     // rendering variables
     bool stats = false;
+    bool gifLoaded = false; // also used in loop (keep)
+    bool waylandSession = SDL_IsShapedWindow(window);
 
-    // konata's texture data
-    TextureData texture;
+    // load data into konata's texture variable
     std::vector<GifFrame> gif_frames;
     size_t gif_cur = 0;
     int gif_accum_ms = 0;
+    int cur_delay;
     uint64_t last_tick = SDL_GetTicks64();
-
     if (!LoadGifAsFrames("./konata.gif", gif_frames)) { // temporary path
         // fallback - keep texture empty or load single frame
         std::cerr << "[ERROR] Failed to load gif frames!" << std::endl;
     } else {
         if (!gif_frames.empty()) {
             texture = gif_frames[0].tex; // copies handle values
+            gifLoaded = true;
         }
+    }
+    if (gifLoaded) {
+        SDL_SetWindowSize(window, gif_frames[0].tex.width, gif_frames[0].tex.height);
+        // apply shape from the first frame
+        UpdateWindowShapeFromRGBA(window, gif_frames[0].rgba.data(), gif_frames[0].tex.width, gif_frames[0].tex.height, /*alphaThreshold=*/1);
     }
 
     SDL_Event event;
@@ -1368,14 +1531,18 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             g_SwapChainRebuild = false;
         }
 
-        gif_accum_ms += dt_ms;
-        if (!gif_frames.empty()) {
-            int cur_delay = gif_frames[gif_cur].delay_ms;
+        gif_accum_ms += dt_ms; // load GIF frames
+        if (gifLoaded) {
+            cur_delay = gif_frames[gif_cur].delay_ms;
             if (cur_delay <= 0) cur_delay = 100;
             while (gif_accum_ms >= cur_delay) {
                 gif_accum_ms -= cur_delay;
                 gif_cur = (gif_cur + 1) % gif_frames.size();
                 cur_delay = gif_frames[gif_cur].delay_ms;
+                if (waylandSession) {
+                    SDL_GetWindowSize(window, &gif_frames[gif_cur].tex.width, &gif_frames[gif_cur].tex.height);
+                    UpdateWindowShapeFromRGBA(window, gif_frames[gif_cur].rgba.data(), gif_frames[gif_cur].tex.width, gif_frames[gif_cur].tex.height, 1);
+                }
                 // update drawable texture to point to new descriptor set
                 texture = gif_frames[gif_cur].tex; // shallow copy of handles is ok
             }
@@ -1386,31 +1553,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        {
-            
-            ImGui::SetNextWindowPos(ImVec2(0,0), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2((float)fb_width,(float)fb_height), ImGuiCond_Always);
-            static float f = 0.0f;
-            ImGui::Begin("Konata Dancer Remake", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus);
-            ImGui::SetNextWindowSize(ImGui::GetWindowSize());
-            ImGui::Text("Konata Dancer Configuration");
-            ImGui::Checkbox("enable performance statistics", &stats);
-            ImGui::Spacing();
-            if (ImGui::Button("Minimize")) {
-                Minimize();
-            }
-            if (ImGui::Button("Exit")) {
-                if (!Shutdown(surface)) {
-                    std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
-                    std::exit(EXIT_FAILURE);
-                }
-            } ImGui::Dummy(ImVec2(0.0f, 20.0f));
-            if (ImGui::Button("Kill (not recommended)")) {
-                exit(EXIT_SUCCESS);
-            }
-            ImGui::End();
-
-        }
         { // konata rendering cycle
             // remove padding
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -1482,7 +1624,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                          ImGuiWindowFlags_NoBackground);
             ImGui::GetForegroundDrawList();
             
-            if (ImGui::Button("T")) {
+            if (ImGui::Button("_")) {
                 Minimize();
             }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -1496,7 +1638,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
                 }
             }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip("Quit konamask");
+                ImGui::SetTooltip("Quit");
             }
             
             ImGui::End();
@@ -1511,10 +1653,13 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
         if (!is_minimized)
         {
-            VkSurfaceCapabilitiesKHR caps;
-vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface, &caps);
-printf("[vulkan] supportedCompositeAlpha = 0x%x, chosen format = %d\n", caps.supportedCompositeAlpha, wd->SurfaceFormat.format);
-
+            // VkSurfaceCapabilitiesKHR caps;
+            // vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface, &caps);
+            // printf("[vulkan] supportedCompositeAlpha = 0x%x, chosen format = %d\n", caps.supportedCompositeAlpha, wd->SurfaceFormat.format);
+            wd->ClearValue.color.float32[0] = 0.03f; // r
+            wd->ClearValue.color.float32[1] = 0.03f; // g
+            wd->ClearValue.color.float32[2] = 0.03f; // b
+            wd->ClearValue.color.float32[3] = 0.0f;  // a (transparency)
             FrameRender(wd, draw_data);
             FramePresent(wd);
         }

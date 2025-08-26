@@ -1611,7 +1611,12 @@ void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, V
         for (VkCompositeAlphaFlagBitsKHR a : preferred_alphas) {
             if (surfCaps.supportedCompositeAlpha & a) { compositeAlpha = a; break; }
         }
-
+        const VkFormat requestSurfaceImageFormat[] = {
+            VK_FORMAT_B8G8R8A8_UNORM,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_FORMAT_B8G8R8_UNORM,
+            VK_FORMAT_R8G8B8_UNORM
+        };
         info.compositeAlpha = compositeAlpha;
         info.presentMode = wd->PresentMode;
         info.clipped = VK_TRUE;
