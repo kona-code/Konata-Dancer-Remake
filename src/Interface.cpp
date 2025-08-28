@@ -1660,7 +1660,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
             {
-                ImGui::SetNextWindowPos(ImVec2(2, fb_height-16), ImGuiCond_Always);
+                ImGui::SetNextWindowPos(ImVec2(round(fb_width)/4, fb_height-48), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(fb_width,32), ImGuiCond_Always);
             
                 ImGui::Begin("statistics", nullptr,
