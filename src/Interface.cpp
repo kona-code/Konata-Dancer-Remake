@@ -30,6 +30,13 @@
 #include <algorithm>
 #include <string>
 
+#define USING_WAYLAND true
+
+#ifdef USING_WAYLAND
+#include <SDL2/SDL_syswm.h>   // SDL_GetWindowWMInfo
+#include <wayland-client.h>   // low-level wayland input-region manipulation (remove if you don't run wayland)
+#endif
+
 extern "C" {
 #include "gifdec.h" // from https://github.com/lecram/gifdec
 }
@@ -1303,6 +1310,7 @@ static void CopyPremultipliedToStagingAndUpload(const uint8_t* pixels, size_t im
     free(prem);
 }
 
+#ifdef USING_WAYLAND
 static void premultiply_rgba8(const uint8_t* src, uint8_t* out, size_t pixels_count) { // for wayland sessions
     // pixels_count = w*h
     for (size_t i = 0; i < pixels_count; ++i) {
@@ -1329,6 +1337,68 @@ static void premultiply_rgba8(const uint8_t* src, uint8_t* out, size_t pixels_co
         }
     }
 }
+
+static struct wl_compositor* s_wl_compositor = nullptr;
+
+static void registry_global_cb(void* data, struct wl_registry* registry, uint32_t id, const char* interface, uint32_t version) {
+    if (strcmp(interface, "wl_compositor") == 0) {
+        s_wl_compositor = (struct wl_compositor*)wl_registry_bind(registry, id, &wl_compositor_interface, 1);
+    }
+}
+static void registry_global_remove_cb(void* data, struct wl_registry* registry, uint32_t id) {
+    (void)data; (void)registry; (void)id;
+}
+static const struct wl_registry_listener s_registry_listener = {
+    registry_global_cb,
+    registry_global_remove_cb
+};
+
+static void clickthrough(SDL_Window* window) {
+    if (!window) return;
+
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info)) {
+        fprintf(stderr, "[WARN] SDL_GetWindowWMInfo failed: %s\n", SDL_GetError());
+        return;
+    }
+    if (info.subsystem != SDL_SYSWM_WAYLAND) {
+        return;
+    }
+
+    struct wl_display* display = info.info.wl.display;
+    struct wl_surface* surface = info.info.wl.surface;
+    if (!display || !surface) {
+        fprintf(stderr, "[WARN] wayland display/surface null\n");
+        return;
+    }
+
+    // bind compositor if not already bound
+    struct wl_registry* registry = wl_display_get_registry(display);
+    if (!registry) {
+        fprintf(stderr, "[WARN] wl_display_get_registry failed\n");
+        return;
+    }
+    wl_registry_add_listener(registry, &s_registry_listener, NULL);
+    wl_display_roundtrip(display); // registry callbacks
+
+    if (!s_wl_compositor) {
+        fprintf(stderr, "[WARN] could not bind wl_compositor\n");
+        wl_registry_destroy(registry);
+        return;
+    }
+
+    // create empty region (no input/click-through)
+    struct wl_region* region = wl_compositor_create_region(s_wl_compositor);
+    // no rects (empty region)
+    wl_surface_set_input_region(surface, region);
+    wl_surface_commit(surface);
+    wl_display_flush(display);
+
+    wl_region_destroy(region);
+    wl_registry_destroy(registry);
+}
+#endif
 
 int Interface::Render(std::atomic<bool>* runningFlag) {
 
@@ -1378,7 +1448,9 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     SDL_GetWindowSize(window, &w, &h);
     ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
     SetupVkWindow(wd, surface, w, h);
-
+#ifdef USING_WAYLAND
+    clickthrough(window);
+#endif
     // setup ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -1474,7 +1546,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackResize;
 
     // rendering variables
-    bool stats = false;
     bool gifLoaded = false; // also used in loop (keep)
     bool waylandSession = SDL_IsShapedWindow(window);
 
@@ -1608,7 +1679,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::PopStyleVar();
             ImGui::PopStyleColor();
         }
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        /*ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
         {
@@ -1645,7 +1716,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         }
         ImGui::PopStyleVar();
         ImGui::PopStyleVar();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleColor();*/
         
         // rendering
         ImGui::Render();

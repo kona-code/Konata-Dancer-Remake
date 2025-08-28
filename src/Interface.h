@@ -5,7 +5,8 @@ class Interface {
 public:
     int Initialize();
     int Render(std::atomic<bool>* runningFlag);
-    static void Minimize();
     static void Show();
+    bool stats = false;
 private:
+    static void Minimize();
 };

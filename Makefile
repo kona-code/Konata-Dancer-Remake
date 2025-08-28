@@ -9,11 +9,11 @@ OBJDIR     := obj
 BINDIR     := output
 
 # --- flags ---------------------------------------------------------
-CXXFLAGS := $(shell $(PKG_CONFIG) --cflags sdl2 gtk+-3.0 appindicator3-0.1)
+CXXFLAGS := $(shell $(PKG_CONFIG) --cflags sdl2 gtk+-3.0 appindicator3-0.1 wayland-client) # remove wayland-client if not compiling for wayland
 CXXFLAGS += -Iinclude -I/usr/include/glib-2.0 -I/usr/include/gtk-3.0
 CFLAGS   := -std=c17      -O2 -g `pkg-config --cflags sdl2` -I$(SRCDIR)
 
-LDFLAGS  := $(shell $(PKG_CONFIG) --libs sdl2 gtk+-3.0 appindicator3-0.1)
+LDFLAGS  := $(shell $(PKG_CONFIG) --libs sdl2 gtk+-3.0 appindicator3-0.1 wayland-client) # remove wayland-client if not compiling for wayland
 LDFLAGS  +=  -limgui -lvulkan
 
 # --- sources -------------------------------------------------------
