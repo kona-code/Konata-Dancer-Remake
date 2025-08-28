@@ -87,8 +87,7 @@ static inline void kill(struct tray_menu *item) {
 
 static inline void shutdown(struct tray_menu *item) {
     uiRunning = false;
-    
-    std::exit(EXIT_SUCCESS);
+    //std::exit(EXIT_SUCCESS);
 }
 static struct tray tray = {
     .icon = TRAY_ICON1,

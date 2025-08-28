@@ -1743,6 +1743,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     gif_frames.clear();
     if (!Shutdown(surface)) {
         std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
+        std::exit(EXIT_FAILURE);
     }
 
     return 0;
