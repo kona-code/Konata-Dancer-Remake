@@ -1,5 +1,9 @@
 // most initialization code was taken from: https://github.com/ocornut/imgui/
 
+// true for SDL3, false for SDL2 (for debugging) - manual switch in makefile is required
+#define SDL3_ENABLED
+#define USING_WAYLAND true
+
 #include "Interface.h"
 #include <chrono>
 #include <cstddef>
@@ -11,12 +15,22 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include "imgui_impl_vulkan.h"
-#include "imgui_impl_sdl2.h"
 #include <linux/limits.h>
 #include <stdlib.h>
+
+#ifdef SDL3_ENABLED
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
+#include "imgui_impl_sdl3.h"
+
+#else
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_shape.h>
 #include <SDL2/SDL_vulkan.h>
+#include <SDL2/SDL_syswm.h>
+#include "imgui_impl_sdl2.h"
+
+#endif
 #include <thread>
 #include <vector>
 #include <vulkan/vk_platform.h>
@@ -30,11 +44,43 @@
 #include <algorithm>
 #include <string>
 
-#define USING_WAYLAND true
 
 #ifdef USING_WAYLAND
-#include <SDL2/SDL_syswm.h>   // SDL_GetWindowWMInfo
-#include <wayland-client.h>   // low-level wayland input-region manipulation (remove if you don't run wayland)
+#ifdef SDL3_ENABLED
+#else
+#include <SDL2/SDL_syswm.h>
+#endif //!SDL3_ENABLED
+#if defined(SDL_MAJOR_VERSION) && SDL_MAJOR_VERSION >= 3
+#ifndef SDL_WINDOW_ALLOW_HIGHDPI
+#define SDL_WINDOW_ALLOW_HIGHDPI SDL_WINDOW_HIGH_PIXEL_DENSITY
+#endif
+#ifndef SDL_WINDOW_SHOWN
+#define SDL_WINDOW_SHOWN 0
+#endif
+#ifndef SDL_QUIT
+#define SDL_QUIT SDL_EVENT_QUIT
+#endif
+#ifndef SDL_WINDOWEVENT
+#define SDL_WINDOWEVENT SDL_EVENT_WINDOW
+#endif
+#ifndef SDL_GetTicks64
+// SDL3 SDL_GetTicks returning 64-bit on modern builds; map fallback
+#define SDL_GetTicks64() SDL_GetTicks()
+#endif
+#ifndef SDL_FreeSurface
+#define SDL_FreeSurface SDL_DestroySurface
+#endif
+// shaped-window API removed in SDL3 - provide harmless stubs when compiling
+static inline int SDL_IsShapedWindow(SDL_Window* w) { (void)w; return 0; }
+static inline int SDL_SetWindowShape(SDL_Window* w, SDL_Surface* s, void* m) { (void)w; (void)s; (void)m; return 0; }
+static inline SDL_Window* SDL_CreateShapedWindow(const char* title, int x, int y, int w, int h, SDL_WindowFlags flags) {
+    (void)x; (void)y;
+    return SDL_CreateWindow(title, w, h, flags);
+}
+#endif // SDL3 compatibility   // SDL_GetWindowWMInfo
+#ifdef USING_WAYLAND
+#include <wayland-client.h>   // low-level wayland input-region manipulation
+#endif
 #endif
 
 extern "C" {
@@ -233,7 +279,7 @@ static void CreateCommandPool() {
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
                               | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = g_QueueFamily;   // same family as your graphics queue
+    poolInfo.queueFamilyIndex = g_QueueFamily;   // same family as graphics queue
 
     if (vkCreateCommandPool(g_Device, &poolInfo, nullptr, &g_CommandPool) != VK_SUCCESS) {
         std::cout << "\n\n>────────────[EXCEPTION]────────────<\n\n[ERROR] (Vulkan) CreateCommandPool: Failed to create command pool!" << std::endl;
@@ -432,7 +478,6 @@ static void SetupVkWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, in
     VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_FIFO_KHR };
 #endif
     wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(g_PhysicalDevice, wd->Surface, &present_modes[0], IM_ARRAYSIZE(present_modes));
-    //printf("[INFO] (Vulkan) Selected PresentMode = %d\n", wd->PresentMode);
 
     IM_ASSERT(g_MinImageCount >= 2);
     ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, width, height, g_MinImageCount);
@@ -452,7 +497,7 @@ static void VkCleanup() {
     vkDestroyDescriptorPool(g_Device, g_DescriptorPool, g_Allocator);
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
-    // remove the debug report callback
+    // remove debug report callback
     auto f_vkDestroyDebugReportCallbackEXT = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkDestroyDebugReportCallbackEXT");
     f_vkDestroyDebugReportCallbackEXT(g_Instance, g_DebugReport, g_Allocator);
 #endif
@@ -584,7 +629,7 @@ VkImage CreateFontImage(VkDevice device, VkPhysicalDevice phys, int w, int h, Vk
 
     VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     allocInfo.allocationSize = req.size;
-    // findMemoryType is your helper to pick a memory type index with VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    // findMemoryType helper to pick a memory type index with VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     allocInfo.memoryTypeIndex = findMemoryType(phys, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     vkAllocateMemory(device, &allocInfo, nullptr, &outMemory);
@@ -678,8 +723,11 @@ static int Shutdown(VkSurfaceKHR g_Surface) {
 
         // shutdown ImGui renderer & platform backends (renderer first)
         ImGui_ImplVulkan_Shutdown();
+#ifdef SDL3_ENABLED
+        ImGui_ImplSDL3_Shutdown();
+#else
         ImGui_ImplSDL2_Shutdown();
-
+#endif
         if (ImGui::GetCurrentContext() != nullptr) {
             ImGui::DestroyContext();
         }
@@ -738,23 +786,17 @@ static int Shutdown(VkSurfaceKHR g_Surface) {
 
 void Interface::Minimize() {
     if (!window) return;
-    // stop rendering loop
     g_RenderPaused.store(true, std::memory_order_release);
 
-    // hide or minimize the window
     SDL_HideWindow(window);
-    //SDL_MinimizeWindow(g_Window); // minimize to taskbar - scrapped (will not work on some WMs)
+    //SDL_MinimizeWindow(g_Window); // minimize to taskbar - scrapped (will not work on all WMs)
 }
 
 void Interface::Show() {
     if (!window) return;
-
-    // show and bring front
     SDL_ShowWindow(window);
     SDL_RaiseWindow(window);
     SDL_RestoreWindow(window);
-
-    // may need to recreate swapchain if window size changed while hidden
 
     g_RenderPaused.store(false, std::memory_order_release);
 }
@@ -870,7 +912,7 @@ static bool LoadTextureFromFile(const char* filename, TextureData* tex_data) {
         check_vk_result(err);
     }
 
-    // Upload to Buffer:
+    // Upload to Buffer
     {
         void* map = NULL;
         err = vkMapMemory(g_Device, tex_data->UploadBufferMemory, 0, image_size, 0, &map);
@@ -887,9 +929,6 @@ static bool LoadTextureFromFile(const char* filename, TextureData* tex_data) {
 
     // Release image memory using stb
     stbi_image_free(image_data);
-
-    // Create a command buffer that will perform following steps when hit in the command queue.
-    // TODO: this works in the example, but may need input if this is an acceptable way to access the pool/create the command buffer.
     VkCommandPool command_pool = g_MainWindowData.Frames[g_MainWindowData.FrameIndex].CommandPool;
     VkCommandBuffer command_buffer;
     {
@@ -1101,7 +1140,7 @@ bool LoadTextureFromMemoryRGBA(const uint8_t* pixels, int width, int height, Tex
     region.imageExtent = { (uint32_t)width, (uint32_t)height, 1 };
     vkCmdCopyBufferToImage(cmd, out->UploadBuffer, out->Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    // transition -> shader read
+    // transition - shader read
     VkImageMemoryBarrier use_barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     use_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     use_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1168,7 +1207,7 @@ bool LoadGifAsFrames(const char* gif_path, std::vector<GifFrame>& out_frames) {
                 uint8_t b = *in++;
                 uint8_t a = 255;
                 
-                if (gd_is_bgcolor(gif, (uint8_t[]){r,g,b}) ) { // note: prepare temporary array
+                if (gd_is_bgcolor(gif, (uint8_t[]){r,g,b}) ) { // prepare temporary array
                     a = 0;
                 }
                 *out++ = r;
@@ -1214,6 +1253,9 @@ static bool IsRunningWayland() {
 }
 
 void UpdateWindowShapeFromRGBA(SDL_Window* win, const uint8_t* pixels, int width, int height, uint8_t alphaThreshold = 1) {
+#ifdef SDL3_ENABLED
+    return;
+#else
     if (!win) return;
     if (!pixels) {
         std::cerr << "[ERROR] UpdateWindowShapeFromRGBA: pixels == nullptr" << std::endl;
@@ -1255,6 +1297,7 @@ void UpdateWindowShapeFromRGBA(SDL_Window* win, const uint8_t* pixels, int width
     }
 
     SDL_FreeSurface(surf);
+#endif
 }
 
 static void CopyPremultipliedToStagingAndUpload(const uint8_t* pixels, size_t image_size,
@@ -1355,7 +1398,13 @@ static const struct wl_registry_listener s_registry_listener = {
 
 static void clickthrough(SDL_Window* window) {
     if (!window) return;
+#ifdef SDL3_ENABLED
+    SDL_PropertiesID props = SDL_GetWindowProperties(window);
+    void *wl_surface = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, NULL);
+    void *wl_display = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, NULL);
 
+#else
+#ifdef USING_WAYLAND
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (!SDL_GetWindowWMInfo(window, &info)) {
@@ -1397,20 +1446,26 @@ static void clickthrough(SDL_Window* window) {
 
     wl_region_destroy(region);
     wl_registry_destroy(registry);
-}
+
 #endif
+#endif
+#endif
+}
 
 int Interface::Render(std::atomic<bool>* runningFlag) {
 
 
     // create window with Vulkan graphics context
+#ifdef SDL3_ENABLED
+#else
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
-    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS);
+#endif
+    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_TRANSPARENT);
     if (!IsRunningWayland()) {
         window = SDL_CreateShapedWindow("Konata Dancer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, window_flags);
         if (window == nullptr) {
             std::cerr << "[ERROR] SDL_CreateShapedWindow failed: " << SDL_GetError() << "\n[INFO] Falling back to normal SDL_CreateWindow()" << std::endl;
-            window = SDL_CreateWindow("Konata Dancer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, window_flags);
+            window = SDL_CreateWindow("Konata Dancer", 640, 480, window_flags);
             if (window == nullptr) {
                 std::cerr << "[ERROR] (Vulkan/SDL2) SDL_CreateWindow():\n" << SDL_GetError() << std::endl;
                 return -1;
@@ -1419,7 +1474,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
     else {
         std::cout << "[INFO] Renderer will use SDL_CreateWindow() over SDL_CreateShapedWindow() due to Wayland compatibility!" << std::endl;
-        window = SDL_CreateWindow("Konata Dancer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, window_flags);
+        window = SDL_CreateWindow("Konata Dancer", 640, 480, window_flags);
         if (window == nullptr) {
             std::cerr << "[ERROR] (Vulkan/SDL2) SDL_CreateWindow():\n" << SDL_GetError() << std::endl;
             return -1;
@@ -1427,17 +1482,32 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     }
     std::cout << "[INFO] (Vulkan/SDL2) Window created successfully!" << std::endl;
 
+    /* lower-case comment */
+#if defined(SDL_MAJOR_VERSION) && SDL_MAJOR_VERSION >= 3
+    Uint32 extensions_count = 0;
+    const char* const* sdl_exts = SDL_Vulkan_GetInstanceExtensions(&extensions_count);
+    ImVector<const char*> extensions;
+    extensions.resize((int)extensions_count);
+    for (Uint32 _i = 0; _i < extensions_count; ++_i) extensions[_i] = sdl_exts[_i];
+#else
     ImVector<const char*> extensions;
     uint32_t extensions_count = 0;
     SDL_Vulkan_GetInstanceExtensions(window, &extensions_count, nullptr);
     extensions.resize(extensions_count);
     SDL_Vulkan_GetInstanceExtensions(window, &extensions_count, extensions.Data);
-    VkSetup(extensions);
+#endif
+VkSetup(extensions);
 
     // create window surface
     VkSurfaceKHR surface;
     VkResult err;
-    if (SDL_Vulkan_CreateSurface(window, g_Instance, &surface) == 0) {
+    if (
+#if defined(SDL_MAJOR_VERSION) && SDL_MAJOR_VERSION >= 3
+    SDL_Vulkan_CreateSurface(window, g_Instance, NULL, &surface)
+#else
+    SDL_Vulkan_CreateSurface(window, g_Instance, &surface) == SDL_FALSE
+#endif
+    ) {
         printf("[ERROR] (Vulkan/SDL2) Failed to create Vulkan/SDL2 surface.\n");
         return 1;
     }
@@ -1546,6 +1616,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackResize;
 
     // rendering variables
+    bool stats = false;
     bool gifLoaded = false; // also used in loop (keep)
     bool waylandSession = SDL_IsShapedWindow(window);
 
@@ -1660,7 +1731,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
             {
-                ImGui::SetNextWindowPos(ImVec2(round(fb_width)/4, fb_height-48), ImGuiCond_Always);
+                ImGui::SetNextWindowPos(ImVec2(2, fb_height-16), ImGuiCond_Always);
                 ImGui::SetNextWindowSize(ImVec2(fb_width,32), ImGuiCond_Always);
             
                 ImGui::Begin("statistics", nullptr,
@@ -1679,7 +1750,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
             ImGui::PopStyleVar();
             ImGui::PopStyleColor();
         }
-        /*ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f,0.0f,0.0f,0.0f));
         {
@@ -1716,7 +1787,7 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
         }
         ImGui::PopStyleVar();
         ImGui::PopStyleVar();
-        ImGui::PopStyleColor();*/
+        ImGui::PopStyleColor();
         
         // rendering
         ImGui::Render();
@@ -1743,7 +1814,6 @@ int Interface::Render(std::atomic<bool>* runningFlag) {
     gif_frames.clear();
     if (!Shutdown(surface)) {
         std::cout << "[ERROR] (Vulkan/SDL2) Unable to shutdown properly!" << std::endl;
-        std::exit(EXIT_FAILURE);
     }
 
     return 0;
