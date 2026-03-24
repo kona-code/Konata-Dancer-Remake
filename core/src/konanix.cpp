@@ -45,4 +45,20 @@ void konanix::create_instance() {
         logger::log("Failed to create a Vulkan instance!",logger::exc);
         throw std::runtime_error("failed to create instance");
     }
+    logger::log("<Vulkan> Instance created successfully!",logger::dbg);
+}
+
+void konanix::create_device() {
+    
+}
+
+void konanix::cleanup() {
+    if (g_device != VK_NULL_HANDLE)
+        vkDestroyDevice(g_device, nullptr);
+    g_physicaldevice = VK_NULL_HANDLE;
+    if (g_instance != VK_NULL_HANDLE)
+        vkDestroyInstance(g_instance,nullptr);
+
+    logger::log("<Vulkan> Objects cleaned up!",logger::dbg);
+
 }

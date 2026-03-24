@@ -6,6 +6,7 @@ class konanix {
 public:
     void initialize();
     void render();
+    void cleanup();
     std::atomic<bool> running {true};
 private:
     void create_instance();
