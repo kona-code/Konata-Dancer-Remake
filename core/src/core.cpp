@@ -7,15 +7,8 @@
 #include <vulkan/vulkan_core.h>
 // #include <signal.h>
 
-#ifdef _WIN32
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined (__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#else
-#define GLFW_EXPOSE_NATIVE_X11
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+// #include <GLFW/glfw3.h>
+// #include <GLFW/glfw3native.h>
 
 int main(int argc, char *argv[]) {
 
@@ -114,13 +107,6 @@ int main(int argc, char *argv[]) {
 
     logger::log("Creating window object...",logger::dbg);
 
-    if (!glfwInit()) {
-        logger::log("GLFW failed to initialize!",logger::err);
-        return -1;
-    }
-
-    glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
-    glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
     konanix w;
     w.initialize();
 
