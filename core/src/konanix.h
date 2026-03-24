@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #include <vulkan/vulkan.h>
 #include <atomic>
 
@@ -25,6 +26,7 @@ private:
     void create_instance();
     void create_device();
     void create_surface();
+    void create_swap_chain();
 
 
     constexpr static short version[3] = {1, 0, 0};
@@ -33,9 +35,16 @@ protected:
     GLFWwindow* g_window;
     VkInstance g_instance;
     VkSurfaceKHR g_surface;
+
     VkPhysicalDevice g_physicaldevice;
     VkDevice g_device;
     VkQueue g_graphicsqueue;
 
+    VkSwapchainKHR g_swapchain;
+    std::vector<VkImage> g_swapchain_images;
+    VkFormat g_swapchain_image_format;
+    VkExtent2D g_swapchain_extent;
+    std::vector<VkImageView> g_swapchain_image_views;
+    std::vector<VkFramebuffer> g_swapchain_framebuffer;
 
 };

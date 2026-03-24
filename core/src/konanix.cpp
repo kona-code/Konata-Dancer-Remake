@@ -2,6 +2,7 @@
 #include "konanix.h"
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -102,13 +103,13 @@ static int rate_device(VkPhysicalDevice device, VkSurfaceKHR surface, const std:
         logger::log("<Vulkan> Base requirements (geometry shader and sampler anisotropy) are supported!",logger::dbg);
 
     if (check_device_extension_support(device, required_extensions)) {
-            logger::log("<Vulkan> Checking if swapchain extensions are supported on this device...",logger::dbg);{
+            logger::log("<Vulkan> Checking if swap chain extensions are supported on this device...",logger::dbg);{
             SwapChainSupportDetails sc_support = query_swap_chain_support(device, surface);
             if (sc_support.formats.empty() || sc_support.present_modes.empty()) {
-                logger::log("<Vulkan> Swapchain extensions are NOT supported by \""+std::string(p_dev.deviceName)+"\"!",logger::dbg);
+                logger::log("<Vulkan> Swap chain extensions are NOT supported by \""+std::string(p_dev.deviceName)+"\"!",logger::dbg);
                 return -1;
             }
-            logger::log("<Vulkan> Swapchain extensions are supported!",logger::dbg);
+            logger::log("<Vulkan> Swap chain extensions are supported!",logger::dbg);
         }
     } else {
         logger::log("<Vulkan> Device \""+std::string(p_dev.deviceName)+"\" does not support extensions!",logger::dbg);
@@ -211,6 +212,34 @@ static VkPhysicalDevice pick_device(VkInstance instance, VkSurfaceKHR surface,co
 }
 
 
+static VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR &capabilities, GLFWwindow* window) {
+    if (capabilities.currentExtent.width!=std::numeric_limits<uint32_t>::max() || capabilities.currentExtent.height!=std::numeric_limits<uint32_t>::max()) {
+        return capabilities.currentExtent;
+    } else {
+        int width, height;
+        glfwGetFramebufferSize(window, &width, &height);
+
+        VkExtent2D actual = {static_cast<uint32_t>(width),static_cast<uint32_t>(height)};
+        actual.width = std::clamp(actual.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+        actual.height = std::clamp(actual.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+        return actual;
+    }
+}
+
+static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR> availableFormats) {
+    for (const auto& availableFormat : availableFormats) {
+        if (availableFormat.format==VK_FORMAT_B8G8R8_SRGB&&availableFormat.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return availableFormat;
+    }
+    return availableFormats[0]; // TODO: make a ranking system for the next best format
+}
+
+static VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentModeKHR> &availablePresentModes) {
+    for (const auto& availablePresentMode : availablePresentModes) {
+        if (availablePresentMode==VK_PRESENT_MODE_MAILBOX_KHR) return availablePresentMode;
+    }
+    return VK_PRESENT_MODE_FIFO_KHR; // best default option
+}
 
 
 
@@ -247,6 +276,43 @@ void konanix::initialize() {
     create_device();
 
 }
+
+void konanix::cleanup() {
+    if (g_device!=VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(g_device);
+    }
+
+    if (g_device!=VK_NULL_HANDLE) {
+        vkDestroyDevice(g_device,nullptr);
+        g_device = VK_NULL_HANDLE;
+        logger::log("<Vulkan> Device instance destroyed successfully!",logger::dbg);
+    }
+
+    if (g_surface!=VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(g_instance, g_surface, nullptr);
+        g_surface = VK_NULL_HANDLE;
+        logger::log("<Vulkan> Surface destroyed successfully!",logger::dbg);
+    }
+
+    if (g_instance!=VK_NULL_HANDLE) {
+        vkDestroyInstance(g_instance, nullptr);
+        g_instance = VK_NULL_HANDLE;
+        logger::log("<Vulkan> Instance destroyed successfully!",logger::dbg);
+    }
+
+    if (g_window) {
+        glfwDestroyWindow(g_window);
+        g_window = nullptr;
+    }
+    glfwTerminate();
+    logger::log("<Vulkan> Objects cleaned up!",logger::dbg);
+
+}
+
+
+
+
+
 
 void konanix::create_instance() {
     constexpr VkApplicationInfo appInfo {
@@ -308,6 +374,11 @@ void konanix::create_instance() {
     }
     logger::log("<Vulkan> Instance created successfully!",logger::dbg);
 }
+
+
+
+
+
 
 void konanix::create_device() {
     logger::log("<Vulkan> Setting up a logical device...",logger::dbg);
@@ -375,34 +446,70 @@ void konanix::create_device() {
     logger::log("<Vulkan> Graphics queue set!",logger::dbg);
 }
 
-void konanix::cleanup() {
-    if (g_device!=VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(g_device);
+
+
+
+
+
+void konanix::create_swap_chain() {
+    logger::log("<Vulkan> Creating swap chain...",logger::dbg);
+    
+    SwapChainSupportDetails swap_chain_support = query_swap_chain_support(g_physicaldevice, g_surface);
+    VkSurfaceFormatKHR surface_format = choose_swap_surface_format(swap_chain_support.formats);
+    VkPresentModeKHR present_mode = choose_swap_present_mode(swap_chain_support.present_modes);
+    VkExtent2D extent = choose_swap_extent(swap_chain_support.capabilities, g_window);
+
+    uint32_t image_count = swap_chain_support.capabilities.minImageCount+1; // using fifo
+    if (swap_chain_support.capabilities.maxImageCount > 0 && image_count > swap_chain_support.capabilities.maxImageCount) { // check max
+        image_count = swap_chain_support.capabilities.maxImageCount;
     }
 
-    if (g_device!=VK_NULL_HANDLE) {
-        vkDestroyDevice(g_device,nullptr);
-        g_device = VK_NULL_HANDLE;
-        logger::log("<Vulkan> Device instance destroyed successfully!",logger::dbg);
+    VkSwapchainCreateInfoKHR createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.surface = g_surface;
+    createInfo.minImageCount = image_count;
+
+    createInfo.imageFormat = surface_format.format;
+    createInfo.imageColorSpace = surface_format.colorSpace;
+
+    createInfo.imageExtent = extent;
+
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // change to VK_IMAGE_USAGE_TRANSFER_DST_BIT in the future if implementing post-processing
+
+    QueueFamilyIndices indices = find_queue_families(g_physicaldevice, g_surface);
+    uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+
+    if (indices.graphicsFamily != indices.presentFamily) {
+        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        createInfo.queueFamilyIndexCount = 2;
+        createInfo.pQueueFamilyIndices = queueFamilyIndices;
+        logger::log("<Vulkan> Swap chain will be using \"VK_SHARING_MODE_CONCURRENT\".",logger::dbg);
+    } else {
+        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        createInfo.queueFamilyIndexCount = 0; // optional
+        createInfo.pQueueFamilyIndices = nullptr; // optional
+        logger::log("<Vulkan> Swap chain will be using \"VK_SHARING_MODE_EXCLUSIVE\".",logger::dbg);
+    }
+    createInfo.preTransform = swap_chain_support.capabilities.currentTransform;
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // no transformation needed - change if future transparency is needed 
+
+    createInfo.presentMode = present_mode;
+    createInfo.clipped = VK_TRUE; // enable if full rendering is required in the future https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Swap_chain
+
+    createInfo.oldSwapchain = VK_NULL_HANDLE; // TODO: MAKE REBUILDABLE SWAPCHAINS
+    if (vkCreateSwapchainKHR(g_device,&createInfo,nullptr,&g_swapchain)!=VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to create swap chain!",logger::exc);
+        throw std::runtime_error("failed to create swap chain");
     }
 
-    if (g_surface!=VK_NULL_HANDLE) {
-        vkDestroySurfaceKHR(g_instance, g_surface, nullptr);
-        g_surface = VK_NULL_HANDLE;
-        logger::log("<Vulkan> Surface destroyed successfully!",logger::dbg);
-    }
+    vkGetSwapchainImagesKHR(g_device, g_swapchain, &image_count, nullptr);
+    g_swapchain_images.resize(image_count);
+    vkGetSwapchainImagesKHR(g_device, g_swapchain, &image_count, g_swapchain_images.data());
+    logger::log("<Vulkan> Populated \"g_swapchainImages\" vector!",logger::dbg);
 
-    if (g_instance!=VK_NULL_HANDLE) {
-        vkDestroyInstance(g_instance, nullptr);
-        g_instance = VK_NULL_HANDLE;
-        logger::log("<Vulkan> Instance destroyed successfully!",logger::dbg);
-    }
+    g_swapchain_image_format = surface_format.format;
+    g_swapchain_extent = extent;
 
-    if (g_window) {
-        glfwDestroyWindow(g_window);
-        g_window = nullptr;
-    }
-    glfwTerminate();
-    logger::log("<Vulkan> Objects cleaned up!",logger::dbg);
-
+    logger::log("<Vulkan> Swap chain created!",logger::dbg);
 }
