@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <sys/types.h>
@@ -123,32 +124,43 @@ static int rate_device(VkPhysicalDevice device, VkSurfaceKHR surface, const std:
     int score = 0;
 
     switch (p_dev.deviceType) {
-        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: score += 10000; break;
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: score += 10000; break; // prefer
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: score += 3000; break;
         case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: score += 1000; break;
         case VK_PHYSICAL_DEVICE_TYPE_CPU: score += 100; break;
         default: score += 10; break;
     }
 
-    score = static_cast<int>(p_dev.limits.maxImageDimension2D / 1024);
+    score += static_cast<int>(p_dev.limits.maxImageDimension2D / 1024);
+
+    // add device-local heap size
+    VkPhysicalDeviceMemoryProperties memp_dev{};
+    vkGetPhysicalDeviceMemoryProperties(device, &memp_dev);
+    for (uint32_t i = 0; i < memp_dev.memoryHeapCount; ++i) {
+        if (memp_dev.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            uint64_t mb = memp_dev.memoryHeaps[i].size / (1024ull * 1024ull);
+            score += static_cast<int>(std::min<uint64_t>(mb / 256, 2000));
+            break;
+        }
+    }
 
     if (f_dev.geometryShader) score += 500;
     if (f_dev.samplerAnisotropy) score += 200;
 
+    // prefer dedicated transfer queue
     if (qfi.graphicsFamily.has_value()) {
-        uint32_t queue_family_count = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(device,&queue_family_count,nullptr);
-        std::vector<VkQueueFamilyProperties> qfs(queue_family_count);
-        if (queue_family_count > 0) vkGetPhysicalDeviceQueueFamilyProperties(device,&queue_family_count,qfs.data());
-        
-        for (uint32_t i = 0; i < queue_family_count; ++i) {
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> qfs(queueFamilyCount);
+        if (queueFamilyCount > 0) vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, qfs.data());
+        for (uint32_t i = 0; i < queueFamilyCount; ++i) {
             if ((qfs[i].queueFlags & VK_QUEUE_TRANSFER_BIT) && !(qfs[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
                 score += 50; // dedicated transfer
                 break;
             }
         }
     }
-    logger::log("<Vulkan> Device \""+std::string(p_dev.deviceName)+"\" scored "+std::to_string(score)+" points!",logger::dbg);
+    logger::log("<Vulkan> Device \""+std::string(p_dev.deviceName)+"\" scored "+std::to_string(score)+"!",logger::dbg);
     return score;
 }
 
@@ -171,14 +183,14 @@ static VkPhysicalDevice pick_device(VkInstance instance, VkSurfaceKHR surface,co
     for (VkPhysicalDevice dev : devices) {
         VkPhysicalDeviceProperties p_dev {};
         vkGetPhysicalDeviceProperties(dev,&p_dev);
-        logger::log("Device \""+std::string(p_dev.deviceName)+"\" supports Vulkan! Rating device...",logger::dbg);\
+        logger::log("<Vulkan> Device \""+std::string(p_dev.deviceName)+"\" supports Vulkan! Rating device...",logger::dbg);\
 
         const int score = rate_device(dev,surface,required_extensions,required_features);
         if (score>0) {
             candidates.push_back({dev,score});
-            logger::log("Device \""+std::string(p_dev.deviceName)+"\" accepted! Device scored: "+std::to_string(score)+" points!",logger::dbg);
+            logger::log("<Vulkan> Device \""+std::string(p_dev.deviceName)+"\" accepted! Device scored: "+std::to_string(score)+" points!",logger::dbg);
         } else {
-            logger::log("Device rejected! Reason: score <= 0",logger::dbg);
+            logger::log("<Vulkan> Device rejected! Reason: score <= 0",logger::dbg);
         }
     }
 
@@ -194,7 +206,7 @@ static VkPhysicalDevice pick_device(VkInstance instance, VkSurfaceKHR surface,co
     VkPhysicalDevice best = candidates.front().dev;
     VkPhysicalDeviceProperties bestp_dev{};
     vkGetPhysicalDeviceProperties(best, &bestp_dev);
-    logger::log("Selected device: \""+std::string(bestp_dev.deviceName)+"\". Device score: "+std::to_string(candidates.front().score)+" points.", logger::dbg);
+    logger::log("<Vulkan> Selected device: \""+std::string(bestp_dev.deviceName)+"\". Device score: "+std::to_string(candidates.front().score)+" points.", logger::dbg);
     return best;
 }
 
@@ -205,7 +217,7 @@ static VkPhysicalDevice pick_device(VkInstance instance, VkSurfaceKHR surface,co
 
 konanix::konanix() {
     if (!glfwInit()) {
-        logger::log("GLFW failed to initialize!",logger::exc);
+        logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
         throw std::runtime_error("failed to initialize glfw");
     }
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
@@ -213,7 +225,7 @@ konanix::konanix() {
 
     g_window = glfwCreateWindow(640, 480, "Konata Dancer", nullptr,nullptr);
     if (!g_window) {
-        logger::log("Failed to create a GLFW window!",logger::exc);
+        logger::log("<Vulkan> Failed to create a GLFW window!",logger::exc);
         glfwTerminate();
         throw std::runtime_error("failed to create a glfw window");
     }
@@ -227,7 +239,7 @@ void konanix::initialize() {
     create_instance();
     {
         if (glfwCreateWindowSurface(g_instance, g_window, nullptr, &g_surface) != VK_SUCCESS) {
-            logger::log("Failed to create a window surface!",logger::exc);
+            logger::log("<Vulkan> Failed to create a window surface!",logger::exc);
             throw std::runtime_error("failed to create a window surface");
         }
         logger::log("<Vulkan> Surface created successfully!",logger::dbg);
@@ -291,7 +303,7 @@ void konanix::create_instance() {
 #endif
 
     if (vkCreateInstance(&createInfo,nullptr,&g_instance) != VK_SUCCESS) {
-        logger::log("Failed to create a Vulkan instance!",logger::exc);
+        logger::log("<Vulkan> Failed to create a Vulkan instance!",logger::exc);
         throw std::runtime_error("failed to create instance");
     }
     logger::log("<Vulkan> Instance created successfully!",logger::dbg);
@@ -300,7 +312,7 @@ void konanix::create_instance() {
 void konanix::create_device() {
     logger::log("<Vulkan> Setting up a logical device...",logger::dbg);
 
-
+    const static std::vector<const char*> required_device_extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     constexpr static VkPhysicalDeviceFeatures required_features {
         VK_FALSE,VK_FALSE,VK_FALSE,VK_FALSE,
         VK_TRUE,
@@ -326,19 +338,71 @@ void konanix::create_device() {
     }
     logger::log("<Vulkan> Queue families are present!",logger::dbg);
 
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfoVec;
+    std::vector<VkDeviceQueueCreateInfo> queue_create_info_vec;
+    std::set<uint32_t> uniqueQueueFamilies = {qfi.graphicsFamily.value(),qfi.presentFamily.value()};
+    float queue_priority = 1.0f;
+    for (uint32_t queue_family : uniqueQueueFamilies) {
+        const VkDeviceQueueCreateInfo queueCreateInfo {
+            VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            VK_NULL_HANDLE,
+            0,
+            queue_family,
+            1,
+            &queue_priority
+        };
+        queue_create_info_vec.push_back(queueCreateInfo);
+    }
 
+    const VkDeviceCreateInfo createInfo {
+        VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        static_cast<uint32_t>(queue_create_info_vec.size()),
+        queue_create_info_vec.data(),
+        0,
+        VK_NULL_HANDLE,
+        static_cast<uint32_t>(required_device_extensions.size()),
+        required_device_extensions.data(),
+        &required_features
+    };
 
-
+    if (vkCreateDevice(g_physicaldevice,&createInfo,nullptr,&g_device) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to create a logical device!",logger::exc);
+        throw std::runtime_error("failed to create a logical device");
+    }
+    logger::log("<Vulkan> Logical device created!",logger::dbg);
+    vkGetDeviceQueue(g_device,qfi.graphicsFamily.value(),0,&g_graphicsqueue);
+    logger::log("<Vulkan> Graphics queue set!",logger::dbg);
 }
 
 void konanix::cleanup() {
-    if (g_device != VK_NULL_HANDLE)
-        vkDestroyDevice(g_device, nullptr);
-    g_physicaldevice = VK_NULL_HANDLE;
-    if (g_instance != VK_NULL_HANDLE)
-        vkDestroyInstance(g_instance,nullptr);
+    if (g_device!=VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(g_device);
+    }
 
+    if (g_device!=VK_NULL_HANDLE) {
+        vkDestroyDevice(g_device,nullptr);
+        g_device = VK_NULL_HANDLE;
+        logger::log("<Vulkan> Device instance destroyed successfully!",logger::dbg);
+    }
+
+    if (g_surface!=VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(g_instance, g_surface, nullptr);
+        g_surface = VK_NULL_HANDLE;
+        logger::log("<Vulkan> Surface destroyed successfully!",logger::dbg);
+    }
+
+    if (g_instance!=VK_NULL_HANDLE) {
+        vkDestroyInstance(g_instance, nullptr);
+        g_instance = VK_NULL_HANDLE;
+        logger::log("<Vulkan> Instance destroyed successfully!",logger::dbg);
+    }
+
+    if (g_window) {
+        glfwDestroyWindow(g_window);
+        g_window = nullptr;
+    }
+    glfwTerminate();
     logger::log("<Vulkan> Objects cleaned up!",logger::dbg);
 
 }

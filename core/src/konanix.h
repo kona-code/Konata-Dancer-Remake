@@ -35,6 +35,7 @@ protected:
     VkSurfaceKHR g_surface;
     VkPhysicalDevice g_physicaldevice;
     VkDevice g_device;
+    VkQueue g_graphicsqueue;
 
 
 };

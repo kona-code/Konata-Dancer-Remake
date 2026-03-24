@@ -110,7 +110,6 @@ int main(int argc, char *argv[]) {
     konanix w;
     w.initialize();
 
-    w.cleanup();
     return 0;
 }
 
