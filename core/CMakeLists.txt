@@ -12,6 +12,8 @@ file(GLOB_RECURSE APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
 )
 
+set(SHADER_ROOT "${CMAKE_CURRENT_LIST_DIR}/shaders")
+
 add_executable(konacode ${APP_SOURCES})
 
 target_compile_features(konacode PUBLIC cxx_std_20)
@@ -30,7 +32,6 @@ find_package(Threads REQUIRED)
 target_include_directories(konacode
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${Boost_INCLUDE_DIRS}
 )
 
 # ---------------------------------------------------------------------------
@@ -50,3 +51,13 @@ if(UNIX AND NOT APPLE)
     INSTALL_RPATH "$ORIGIN"
   )
 endif()
+
+# ---------------------------------------------------------------------------
+# copy shaders
+# ---------------------------------------------------------------------------
+add_custom_command(TARGET konacode POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADER_ROOT}" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders"
+
+  VERBATIM
+)

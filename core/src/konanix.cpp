@@ -1,6 +1,7 @@
 #include "core.h"
 #include "konanix.h"
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -274,12 +275,24 @@ void konanix::initialize() {
         logger::log("<Vulkan> Surface created successfully!",logger::dbg);
     }
     create_device();
+    create_swap_chain();
+    create_image_views();
 
 }
 
 void konanix::cleanup() {
     if (g_device!=VK_NULL_HANDLE) {
         vkDeviceWaitIdle(g_device);
+    }
+
+    for (VkImageView iw : g_swapchain_image_views) {
+        vkDestroyImageView(g_device,iw,nullptr);
+    }
+    logger::log("<Vulkan> g_swapchain_image_views vector cleaned up successfully!",logger::dbg);
+
+    if (g_swapchain!=VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(g_device,g_swapchain,nullptr);
+        logger::log("<Vulkan> Swap chain destroyed successfully!",logger::dbg);
     }
 
     if (g_device!=VK_NULL_HANDLE) {
@@ -506,10 +519,49 @@ void konanix::create_swap_chain() {
     vkGetSwapchainImagesKHR(g_device, g_swapchain, &image_count, nullptr);
     g_swapchain_images.resize(image_count);
     vkGetSwapchainImagesKHR(g_device, g_swapchain, &image_count, g_swapchain_images.data());
-    logger::log("<Vulkan> Populated \"g_swapchainImages\" vector!",logger::dbg);
+    logger::log("<Vulkan> Populated \"g_swapchain_images\" vector!",logger::dbg);
 
     g_swapchain_image_format = surface_format.format;
     g_swapchain_extent = extent;
 
     logger::log("<Vulkan> Swap chain created!",logger::dbg);
+}
+
+void konanix::create_image_views() {
+    g_swapchain_image_views.resize(g_swapchain_images.size());
+    for (size_t i = 0; i < g_swapchain_images.size(); i++) {
+        const VkImageViewCreateInfo createInfo {
+            VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            VK_NULL_HANDLE,
+            0,
+            
+            g_swapchain_images[i],
+            VK_IMAGE_VIEW_TYPE_2D,
+            g_swapchain_image_format,
+
+            {
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY
+            },
+            {
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                0,
+                1,
+                0,
+                1
+            }
+        };
+
+        if (vkCreateImageView(g_device,&createInfo,nullptr,&g_swapchain_image_views[i])) {
+            logger::log("<Vulkan> Failed to create swap chain!",logger::exc);
+            throw std::runtime_error("failed to create swap chain");
+        }
+    }
+}
+
+void konanix::recreate_swap_chain() {
+
+
 }

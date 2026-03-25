@@ -108,8 +108,11 @@ int main(int argc, char *argv[]) {
     logger::log("Creating window object...",logger::dbg);
 
     konanix w;
-    w.initialize();
-
+    try {
+        w.initialize();
+    } catch (std::exception &e) {
+        logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
+    }
     return 0;
 }
 

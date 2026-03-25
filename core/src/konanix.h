@@ -27,6 +27,10 @@ private:
     void create_device();
     void create_surface();
     void create_swap_chain();
+    void cleanup_swap_chain();
+    void create_image_views();
+    void create_framebuffers();
+    void recreate_swap_chain();
 
 
     constexpr static short version[3] = {1, 0, 0};
