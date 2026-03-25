@@ -12,7 +12,7 @@ file(GLOB_RECURSE APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
 )
 
-set(SHADER_ROOT "${CMAKE_CURRENT_LIST_DIR}/shaders")
+set(SHADER_ROOT "${CMAKE_CURRENT_LIST_DIR}/shaders/compiled")
 
 add_executable(konacode ${APP_SOURCES})
 
