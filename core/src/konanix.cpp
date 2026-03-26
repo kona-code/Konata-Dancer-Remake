@@ -321,6 +321,11 @@ void konanix::cleanup() {
         vkDeviceWaitIdle(g_device);
     }
 
+    for (VkFramebuffer fb : g_swapchain_framebuffers) {
+        vkDestroyFramebuffer(g_device,fb,nullptr);
+    }
+    logger::log("<Vulkan> g_swapchain_framebuffers vector cleaned up successfully!",logger::dbg);
+
     if (g_graphics_pipeline!=VK_NULL_HANDLE) {
         vkDestroyPipeline(g_device,g_graphics_pipeline,nullptr);
         logger::log("<Vulkan> Gra[hics pipeline destroyed!",logger::dbg);
@@ -877,6 +882,33 @@ void konanix::create_render_pass() {
     }
 
     logger::log("<Vulkan> Render pass created!",logger::dbg);
+}
+
+void konanix::create_framebuffers() {
+    g_swapchain_framebuffers.resize(g_swapchain_image_views.size());
+
+    for (size_t i = 0; i < g_swapchain_image_views.size(); i++) {
+        const VkImageView attachments[] = {
+            g_swapchain_image_views[i]
+        };
+
+        const VkFramebufferCreateInfo framebuffer_info {
+            VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            VK_NULL_HANDLE,
+            0,
+            g_renderpass,
+            1,
+            attachments,
+            g_swapchain_extent.width,
+            g_swapchain_extent.height,
+            1
+        };
+
+        if (vkCreateFramebuffer(g_device, &framebuffer_info, nullptr, &g_swapchain_framebuffers[i]) != VK_SUCCESS) {
+            logger::log("<Vulkan> Failed to a framebuffer!",logger::exc);
+            throw std::runtime_error("failed to create a framebuffer");
+        }
+    }
 }
 
 void konanix::recreate_swap_chain() {

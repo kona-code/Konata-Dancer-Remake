@@ -32,7 +32,6 @@ private:
     void create_image_views();
     void create_render_pass();
     void create_graphics_pipeline();
-
     void create_framebuffers();
     void recreate_swap_chain();
 
@@ -53,7 +52,7 @@ protected:
     VkFormat g_swapchain_image_format;
     VkExtent2D g_swapchain_extent;
     std::vector<VkImageView> g_swapchain_image_views;
-    std::vector<VkFramebuffer> g_swapchain_framebuffer;
+    std::vector<VkFramebuffer> g_swapchain_framebuffers;
 
     VkRenderPass g_renderpass;
     VkPipelineLayout g_pipeline_layout;
