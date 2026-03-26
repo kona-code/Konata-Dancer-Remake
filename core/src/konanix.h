@@ -30,6 +30,7 @@ private:
     void cleanup_swap_chain();
     void create_image_views();
     void create_framebuffers();
+    void create_graphics_pipeline();
     void recreate_swap_chain();
 
 

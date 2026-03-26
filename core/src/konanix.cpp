@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <set>
@@ -242,6 +243,40 @@ static VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentMode
     return VK_PRESENT_MODE_FIFO_KHR; // best default option
 }
 
+static std::vector<char> read_file(const std::string& file) {
+    std::ifstream f(file, std::ios::ate | std::ios::binary);
+    if (!f.is_open()) {
+        logger::log("<Vulkan> Failed to open file at \""+file+"\"!",logger::exc);
+        throw std::runtime_error("failed to open file");
+    }
+
+    size_t f_size = (size_t) f.tellg();
+    std::vector<char> buffer(f_size);
+
+    f.seekg(0);
+    f.read(buffer.data(),f_size);
+    f.close();
+
+    return buffer;
+}
+
+static VkShaderModule create_shader_module(const VkDevice device, const std::vector<char> &code) {
+    const VkShaderModuleCreateInfo createInfo {
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        code.size(),
+        reinterpret_cast<const uint32_t*>(code.data())
+    };
+
+    VkShaderModule s_module;
+    if (vkCreateShaderModule(device, &createInfo, nullptr, &s_module)) {
+        logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
+        throw std::runtime_error("failed to create a shader module");        
+    }
+
+    return s_module;
+}
 
 
 
@@ -285,6 +320,16 @@ void konanix::cleanup() {
         vkDeviceWaitIdle(g_device);
     }
 
+    // if (v_shadermodule!=VK_NULL_HANDLE) {
+    //     vkDestroyShaderModule(g_device,v_shadermodule,nullptr);
+    //     logger::log("<Vulkan> Vertex shader destroyed!",logger::dbg);
+    // }
+
+    // if (f_shadermodule!=VK_NULL_HANDLE) {
+    //     vkDestroyShaderModule(g_device,f_shadermodule,nullptr);
+    //     logger::log("<Vulkan> Fragment shader destroyed!",logger::dbg);
+    // }
+    
     for (VkImageView iw : g_swapchain_image_views) {
         vkDestroyImageView(g_device,iw,nullptr);
     }
@@ -559,6 +604,38 @@ void konanix::create_image_views() {
             throw std::runtime_error("failed to create swap chain");
         }
     }
+}
+
+void konanix::create_graphics_pipeline() {
+
+    VkShaderModule v_shadermodule = create_shader_module(g_device,read_file("shaders/vert.spv"));
+    VkShaderModule f_shadermodule = create_shader_module(g_device,read_file("shaders/frag.spv"));
+
+    const VkPipelineShaderStageCreateInfo v_shader_info {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        v_shadermodule,
+        "main",
+        nullptr
+    };
+
+    const VkPipelineShaderStageCreateInfo f_shader_info {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        v_shadermodule,
+        "main",
+        nullptr
+    };
+
+    VkPipelineShaderStageCreateInfo s_stages[2] = {v_shader_info,f_shader_info};
+
+    vkDestroyShaderModule(g_device,v_shadermodule,nullptr);
+    vkDestroyShaderModule(g_device,f_shadermodule,nullptr);
+
 }
 
 void konanix::recreate_swap_chain() {
