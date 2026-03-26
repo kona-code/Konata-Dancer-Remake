@@ -312,6 +312,7 @@ void konanix::initialize() {
     create_device();
     create_swap_chain();
     create_image_views();
+    create_graphics_pipeline();
 
 }
 
@@ -617,27 +618,20 @@ void konanix::create_graphics_pipeline() {
     VkShaderModule v_shadermodule = create_shader_module(g_device,read_file("shaders/vert.spv"));
     VkShaderModule f_shadermodule = create_shader_module(g_device,read_file("shaders/frag.spv"));
 
-    const VkPipelineShaderStageCreateInfo v_shader_info {
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        VK_SHADER_STAGE_VERTEX_BIT,
-        v_shadermodule,
-        "main",
-        nullptr
-    };
+        VkPipelineShaderStageCreateInfo v_shader_info{};
+        v_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        v_shader_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        v_shader_info.module = v_shadermodule;
+        v_shader_info.pName = "main";
 
-    const VkPipelineShaderStageCreateInfo f_shader_info {
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        v_shadermodule,
-        "main",
-        nullptr
-    };
+        VkPipelineShaderStageCreateInfo f_shader_info{};
+        f_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        f_shader_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        f_shader_info.module = f_shadermodule;
+        f_shader_info.pName = "main";
 
-    VkPipelineShaderStageCreateInfo shader_stages[2] = {v_shader_info,f_shader_info};
+
+    const VkPipelineShaderStageCreateInfo shader_stages[2] = {v_shader_info,f_shader_info};
     logger::log("<Vulkan> Pipeline shader stages set!",logger::dbg);
     
     const std::vector<VkDynamicState> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -649,7 +643,7 @@ void konanix::create_graphics_pipeline() {
         dynamic_states.data()
     };
 
-    const VkPipelineVertexInputStateCreateInfo v_input_info {
+    const VkPipelineVertexInputStateCreateInfo vertex_input_info {
         VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         VK_NULL_HANDLE,
         0,
@@ -779,6 +773,8 @@ void konanix::create_graphics_pipeline() {
 
     create_render_pass();
 
+    logger::log("<Vulkan> Creating graphics pipeline object...",logger::dbg);
+
     const VkGraphicsPipelineCreateInfo pipeline_info {
         VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         VK_NULL_HANDLE,
@@ -786,7 +782,7 @@ void konanix::create_graphics_pipeline() {
 
         2,
         shader_stages,
-        &v_input_info,
+        &vertex_input_info,
         &input_assembly_state_info,
         VK_NULL_HANDLE,
         &viewport_state_info,
@@ -809,6 +805,7 @@ void konanix::create_graphics_pipeline() {
         throw std::runtime_error("failed to create the graphics pipeline");
     }
 
+    logger::log("<Vulkan> Graphics pipeline created! Cleaning shader data...",logger::dbg);
     vkDestroyShaderModule(g_device,v_shadermodule,nullptr);
     vkDestroyShaderModule(g_device,f_shadermodule,nullptr);
 
