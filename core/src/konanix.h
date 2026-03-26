@@ -2,6 +2,7 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 #include <atomic>
+#include <vulkan/vulkan_core.h>
 
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -29,8 +30,10 @@ private:
     void create_swap_chain();
     void cleanup_swap_chain();
     void create_image_views();
-    void create_framebuffers();
+    void create_render_pass();
     void create_graphics_pipeline();
+
+    void create_framebuffers();
     void recreate_swap_chain();
 
 
@@ -51,5 +54,9 @@ protected:
     VkExtent2D g_swapchain_extent;
     std::vector<VkImageView> g_swapchain_image_views;
     std::vector<VkFramebuffer> g_swapchain_framebuffer;
+
+    VkRenderPass g_renderpass;
+    VkPipelineLayout g_pipeline_layout;
+    VkPipeline g_graphics_pipeline;
 
 };
