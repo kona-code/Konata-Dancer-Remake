@@ -607,6 +607,7 @@ void konanix::create_image_views() {
 }
 
 void konanix::create_graphics_pipeline() {
+    logger::log("<Vulkan> Creating the graphics pipeline...",logger::dbg);
 
     VkShaderModule v_shadermodule = create_shader_module(g_device,read_file("shaders/vert.spv"));
     VkShaderModule f_shadermodule = create_shader_module(g_device,read_file("shaders/frag.spv"));
@@ -632,6 +633,55 @@ void konanix::create_graphics_pipeline() {
     };
 
     VkPipelineShaderStageCreateInfo s_stages[2] = {v_shader_info,f_shader_info};
+    logger::log("<Vulkan> Pipeline shader stages set!",logger::dbg);
+    
+    const std::vector<VkDynamicState> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    const VkPipelineDynamicStateCreateInfo dynamic_state {
+        VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        static_cast<uint32_t>(dynamic_states.size()),
+        dynamic_states.data()
+    };
+
+    const VkPipelineVertexInputStateCreateInfo v_input_info {
+        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr
+    };
+
+    constexpr VkPipelineInputAssemblyStateCreateInfo assembly_state_info {
+        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        
+        // from https://vulkan-tutorial.com/en/Drawing_a_triangle/Graphics_pipeline_basics/Fixed_functions
+        // VK_PRIMITIVE_TOPOLOGY_POINT_LIST,        // points from vertices
+        // VK_PRIMITIVE_TOPOLOGY_LINE_LIST,         // line from every 2 vertices without reuse
+        // VK_PRIMITIVE_TOPOLOGY_LINE_STRIP,        // the end vertex of every line is used as start vertex for the next line
+        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,        // triangle from every 3 vertices without reuse
+        // VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,    // the second and third vertex of every triangle are used as first two vertices of the next triangle
+
+        VK_FALSE
+    };
+
+    const VkViewport viewport {
+        0.0f,
+        0.0f,
+        (float) g_swapchain_extent.width,
+        (float) g_swapchain_extent.height,
+        0.0f,
+        1.0f
+    };
+
+    const VkRect2D scissor {
+        {0,0},
+        g_swapchain_extent
+    };
 
     vkDestroyShaderModule(g_device,v_shadermodule,nullptr);
     vkDestroyShaderModule(g_device,f_shadermodule,nullptr);
