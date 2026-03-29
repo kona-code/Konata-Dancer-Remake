@@ -33,8 +33,13 @@ private:
     void create_render_pass();
     void create_graphics_pipeline();
     void create_framebuffers();
+    void create_commandpool();
+    void create_commandbuffer();
+    void create_sync_objects();
+    void draw_frame();
     void recreate_swap_chain();
 
+    void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
 
     constexpr static short version[3] = {1, 0, 0};
 
@@ -58,4 +63,10 @@ protected:
     VkPipelineLayout g_pipeline_layout;
     VkPipeline g_graphics_pipeline;
 
+    VkCommandPool g_commandpool;
+    VkCommandBuffer g_commandbuffer;
+
+    VkSemaphore g_image_available_semaphore;
+    VkSemaphore g_render_finished_semaphore;
+    VkFence g_in_flight_fence;
 };

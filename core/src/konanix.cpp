@@ -272,11 +272,13 @@ static VkShaderModule create_shader_module(const VkDevice device, const std::vec
     VkShaderModule s_module;
     if (vkCreateShaderModule(device, &createInfo, nullptr, &s_module)) {
         logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
-        throw std::runtime_error("failed to create a shader module");        
+        throw std::runtime_error("failed to create a shader module");
     }
 
     return s_module;
 }
+
+
 
 
 
@@ -312,11 +314,36 @@ void konanix::initialize() {
     create_device();
     create_swap_chain();
     create_image_views();
+    create_render_pass();
     create_graphics_pipeline();
+    create_framebuffers();
+    create_commandpool();
+    create_framebuffers();
+    create_sync_objects();
 
 }
 
 void konanix::cleanup() {
+    if (g_image_available_semaphore!=VK_NULL_HANDLE) {
+        vkDestroySemaphore(g_device,g_image_available_semaphore,nullptr);
+        logger::log("<Vulkan> Semaphore \"g_image_available_semaphore\" destroyed!",logger::dbg);
+    }
+        
+    if (g_render_finished_semaphore!=VK_NULL_HANDLE) {
+        vkDestroySemaphore(g_device,g_render_finished_semaphore,nullptr);
+        logger::log("<Vulkan> Semaphore \"g_render_finished_semaphore\" destroyed!",logger::dbg);
+    }  
+
+    if (g_in_flight_fence!=VK_NULL_HANDLE) {
+        vkDestroyFence(g_device,g_in_flight_fence,nullptr);
+        logger::log("<Vulkan> Fence \"g_in_flight_fence\" destroyed!",logger::dbg);
+    }
+
+    if (g_commandpool!=VK_NULL_HANDLE) {
+        vkDestroyCommandPool(g_device,g_commandpool,nullptr);
+        logger::log("<Vulkan> Command pool destroyed!",logger::dbg);
+    }
+
     if (g_device!=VK_NULL_HANDLE) {
         vkDeviceWaitIdle(g_device);
     }
@@ -328,7 +355,7 @@ void konanix::cleanup() {
 
     if (g_graphics_pipeline!=VK_NULL_HANDLE) {
         vkDestroyPipeline(g_device,g_graphics_pipeline,nullptr);
-        logger::log("<Vulkan> Gra[hics pipeline destroyed!",logger::dbg);
+        logger::log("<Vulkan> Graphics pipeline destroyed!",logger::dbg);
     }
 
     if (g_pipeline_layout!=VK_NULL_HANDLE) {
@@ -776,8 +803,6 @@ void konanix::create_graphics_pipeline() {
         throw std::runtime_error("failed to create the pipeline layout");
     }
 
-    create_render_pass();
-
     logger::log("<Vulkan> Creating graphics pipeline object...",logger::dbg);
 
     const VkGraphicsPipelineCreateInfo pipeline_info {
@@ -911,7 +936,179 @@ void konanix::create_framebuffers() {
     }
 }
 
-void konanix::recreate_swap_chain() {
+void konanix::create_commandpool() {
+    logger::log("<Vulkan> Creating command pool...",logger::dbg);
 
+    QueueFamilyIndices qfi = find_queue_families(g_physicaldevice, g_surface);
+
+    const VkCommandPoolCreateInfo pool_info{
+        VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        VK_NULL_HANDLE,
+
+        // VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,               // Hint that command buffers are rerecorded with new commands very often (may change memory allocation behavior)
+        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,    // Allow command buffers to be rerecorded individually, without this flag they all have to be reset together
+
+        qfi.graphicsFamily.value()
+    };
+
+    if (vkCreateCommandPool(g_device,&pool_info,nullptr,&g_commandpool) != VK_SUCCESS) {
+            logger::log("<Vulkan> Failed to the command pool!",logger::exc);
+            throw std::runtime_error("failed to create command pool");
+    }
+    logger::log("<Vulkan> Command pool created!",logger::dbg);
+
+}
+
+void konanix::create_commandbuffer() {
+    logger::log("<Vulkan> Allocating command buffer...",logger::dbg);
+
+    // "I dont care" (jerysub @ 29/03/2026 T14:52:31)
+    const VkCommandBufferAllocateInfo alloc_info {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        VK_NULL_HANDLE,
+        
+        g_commandpool,
+        VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        1
+    };
+
+    if (vkAllocateCommandBuffers(g_device,&alloc_info,&g_commandbuffer) != VK_SUCCESS) {
+            logger::log("<Vulkan> Failed to allocate the command buffer!",logger::exc);
+            throw std::runtime_error("failed to allocate command buffer");
+    }
+
+    logger::log("<Vulkan> Command buffer allocated successfully!",logger::dbg);
+
+}
+
+void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index) {
+
+    constexpr VkCommandBufferBeginInfo begin_info {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        VK_NULL_HANDLE,
+        // VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,         The command buffer will be rerecorded right after executing it once.
+        // VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT,    This is a secondary command buffer that will be entirely within a single render pass.
+        // VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,        The command buffer can be resubmitted while it is also already pending execution.        
+        0,
+        nullptr
+    };
+    if (vkBeginCommandBuffer(commandbuffer,&begin_info) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to begin recording the command buffer!",logger::exc);
+        throw std::runtime_error("failed to begin recording command buffer");
+    }
+    logger::log("<Vulkan> Began command buffer!",logger::dbg);
+
+    const VkClearValue clear_color = {{{0.0f,0.0f,0.0f,1.0f}}};
+
+    const VkRenderPassBeginInfo renderpass_info {
+        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        VK_NULL_HANDLE,
+
+        g_renderpass,
+        g_swapchain_framebuffers[image_index],
+        {
+            {0, 0},
+            g_swapchain_extent
+        },
+        1,
+        &clear_color
+    };
+    vkCmdBeginRenderPass(commandbuffer,&renderpass_info,VK_SUBPASS_CONTENTS_INLINE);
+    logger::log("<Vulkan> Began render pass!",logger::dbg);
+
+    vkCmdBindPipeline(commandbuffer,VK_PIPELINE_BIND_POINT_GRAPHICS,g_graphics_pipeline);
+    logger::log("<Vulkan> Pipeline bound!",logger::dbg);
+
+    const VkViewport viewport {
+        0.0f,
+        0.0f,
+        static_cast<float>(g_swapchain_extent.width),
+        static_cast<float>(g_swapchain_extent.height),
+        0.0f,
+        1.0f
+    };
+    vkCmdSetViewport(commandbuffer,0,1,&viewport);
+    logger::log("<Vulkan> Viewport set!",logger::dbg);
+
+    const VkRect2D scissor {
+        {0,0},
+        g_swapchain_extent
+    };
+    vkCmdSetScissor(commandbuffer,0,1,&scissor);
+    logger::log("<Vulkan> Scissor set!",logger::dbg);
+
+    vkCmdDraw(commandbuffer,3,1,0,0);
+    vkCmdEndRenderPass(commandbuffer);
+
+    if (vkEndCommandBuffer(commandbuffer) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed record command buffer!",logger::exc);
+        throw std::runtime_error("failed to record command buffer");
+    }
+}
+
+void konanix::create_sync_objects() {
+    constexpr VkSemaphoreCreateInfo semaphore_info {
+        VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0
+    };
+
+    constexpr VkFenceCreateInfo fence_info {
+        VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        VK_FENCE_CREATE_SIGNALED_BIT
+    };
+
+    if (vkCreateSemaphore(g_device,&semaphore_info,nullptr,&g_image_available_semaphore) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed create a semaphore!",logger::exc);
+        throw std::runtime_error("failed to create a semaphore");
+    }    
+    if (vkCreateSemaphore(g_device,&semaphore_info,nullptr,&g_render_finished_semaphore) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed create a semaphore!",logger::exc);
+        throw std::runtime_error("failed to create a semaphore");
+    }    
+
+    if (vkCreateFence(g_device,&fence_info,nullptr,&g_in_flight_fence) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed create a fance!",logger::exc);
+        throw std::runtime_error("failed to create a fence");
+    }    
+}
+
+void konanix::draw_frame() {
+    vkWaitForFences(g_device,1,&g_in_flight_fence,VK_TRUE,UINT64_MAX);
+    vkResetFences(g_device,1,&g_in_flight_fence);
+
+    uint32_t image_index;
+    vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphore, VK_NULL_HANDLE, &image_index);
+
+    vkResetCommandBuffer(g_commandbuffer,0);
+    record_command_buffer(g_commandbuffer, image_index);
+    
+    const VkSemaphore wait_semaphores[] = {g_image_available_semaphore};
+    const VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    const VkSemaphore signal_semaphores[] = {g_render_finished_semaphore};
+
+    const VkSubmitInfo submit_info {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        VK_NULL_HANDLE,
+
+        1,
+        wait_semaphores,
+        wait_stages,
+
+        1,
+        &g_commandbuffer,
+
+        1,
+        signal_semaphores
+    };
+
+    if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fence) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
+        throw std::runtime_error("failed to submit draw command buffer");
+    }    
+};
+
+void konanix::recreate_swap_chain() {
 
 }
