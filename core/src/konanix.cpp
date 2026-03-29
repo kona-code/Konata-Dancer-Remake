@@ -318,7 +318,7 @@ void konanix::initialize() {
     create_graphics_pipeline();
     create_framebuffers();
     create_commandpool();
-    create_framebuffers();
+    create_commandbuffer();
     create_sync_objects();
 
 }
@@ -539,7 +539,8 @@ void konanix::create_device() {
     }
     logger::log("<Vulkan> Logical device created!",logger::dbg);
     vkGetDeviceQueue(g_device,qfi.graphicsFamily.value(),0,&g_graphicsqueue);
-    logger::log("<Vulkan> Graphics queue set!",logger::dbg);
+    vkGetDeviceQueue(g_device,qfi.presentFamily.value(),0,&g_presentqueue);
+    logger::log("<Vulkan> Graphics and present queue set!",logger::dbg);
 }
 
 
@@ -889,6 +890,17 @@ void konanix::create_render_pass() {
         &color_attachment_ref
     };
 
+    constexpr VkSubpassDependency dependency {
+        VK_SUBPASS_EXTERNAL,
+        0,
+
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        0,
+
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    };
+
     const VkRenderPassCreateInfo renderpass_info {
         VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
         VK_NULL_HANDLE,
@@ -898,7 +910,10 @@ void konanix::create_render_pass() {
         &color_attachment,
 
         1,
-        &subpass
+        &subpass,
+
+        1,
+        &dependency
     };
 
     if (vkCreateRenderPass(g_device, &renderpass_info, nullptr, &g_renderpass) != VK_SUCCESS) {
@@ -996,7 +1011,7 @@ void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t imag
         logger::log("<Vulkan> Failed to begin recording the command buffer!",logger::exc);
         throw std::runtime_error("failed to begin recording command buffer");
     }
-    logger::log("<Vulkan> Began command buffer!",logger::dbg);
+    // logger::log("<Vulkan> Began command buffer!",logger::dbg);
 
     const VkClearValue clear_color = {{{0.0f,0.0f,0.0f,1.0f}}};
 
@@ -1014,10 +1029,10 @@ void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t imag
         &clear_color
     };
     vkCmdBeginRenderPass(commandbuffer,&renderpass_info,VK_SUBPASS_CONTENTS_INLINE);
-    logger::log("<Vulkan> Began render pass!",logger::dbg);
+    // logger::log("<Vulkan> Began render pass!",logger::dbg);
 
     vkCmdBindPipeline(commandbuffer,VK_PIPELINE_BIND_POINT_GRAPHICS,g_graphics_pipeline);
-    logger::log("<Vulkan> Pipeline bound!",logger::dbg);
+    // logger::log("<Vulkan> Pipeline bound!",logger::dbg);
 
     const VkViewport viewport {
         0.0f,
@@ -1028,14 +1043,14 @@ void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t imag
         1.0f
     };
     vkCmdSetViewport(commandbuffer,0,1,&viewport);
-    logger::log("<Vulkan> Viewport set!",logger::dbg);
+    // logger::log("<Vulkan> Viewport set!",logger::dbg);
 
     const VkRect2D scissor {
         {0,0},
         g_swapchain_extent
     };
     vkCmdSetScissor(commandbuffer,0,1,&scissor);
-    logger::log("<Vulkan> Scissor set!",logger::dbg);
+    // logger::log("<Vulkan> Scissor set!",logger::dbg);
 
     vkCmdDraw(commandbuffer,3,1,0,0);
     vkCmdEndRenderPass(commandbuffer);
@@ -1102,11 +1117,30 @@ void konanix::draw_frame() {
         1,
         signal_semaphores
     };
-
     if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fence) != VK_SUCCESS) {
         logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
         throw std::runtime_error("failed to submit draw command buffer");
-    }    
+    } 
+    
+
+    const VkSwapchainKHR swapchains[] = {g_swapchain};
+
+    const VkPresentInfoKHR present_info {
+        VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        VK_NULL_HANDLE,
+
+        1,
+        signal_semaphores,
+
+        1,
+        swapchains,
+
+        &image_index,
+
+        nullptr
+    };
+    vkQueuePresentKHR(g_presentqueue,&present_info);
+
 };
 
 void konanix::recreate_swap_chain() {

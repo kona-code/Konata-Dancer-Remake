@@ -113,6 +113,13 @@ int main(int argc, char *argv[]) {
     } catch (std::exception &e) {
         logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
     }
+
+    while (!glfwWindowShouldClose(w.g_window)) {
+        glfwPollEvents();
+        w.draw_frame();
+        
+    }
+
     return 0;
 }
 

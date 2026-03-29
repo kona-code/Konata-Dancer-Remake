@@ -17,9 +17,11 @@
 
 class konanix {
 public:
+    GLFWwindow* g_window;
     void initialize();
     void render();
     void cleanup();
+    void draw_frame();
     std::atomic<bool> running {true};
     konanix();
     ~konanix();
@@ -36,7 +38,6 @@ private:
     void create_commandpool();
     void create_commandbuffer();
     void create_sync_objects();
-    void draw_frame();
     void recreate_swap_chain();
 
     void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
@@ -44,13 +45,13 @@ private:
     constexpr static short version[3] = {1, 0, 0};
 
 protected:
-    GLFWwindow* g_window;
     VkInstance g_instance;
     VkSurfaceKHR g_surface;
 
     VkPhysicalDevice g_physicaldevice;
     VkDevice g_device;
     VkQueue g_graphicsqueue;
+    VkQueue g_presentqueue;
 
     VkSwapchainKHR g_swapchain;
     std::vector<VkImage> g_swapchain_images;
