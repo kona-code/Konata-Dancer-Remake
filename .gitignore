@@ -1,3 +1,5 @@
 /.vscode
 /konata.gif
 /obj
+/output/build.sh
+/output/konata.gif

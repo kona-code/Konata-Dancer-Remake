@@ -2,13 +2,49 @@
 #include "konanix.h"
 #include "logger.h"
 #include <GLFW/glfw3.h>
+#include <cstdint>
 #include <cstdio>
+#include <stdexcept>
 #include <string>
+#include <stdlib.h>
 #include <vulkan/vulkan_core.h>
+
+#define STB_ONLY_GIF
+#define STB_IMAGE_IMPLEMENTATION
+#include "./stb_image.h"
 // #include <signal.h>
 
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
+
+unsigned char* file_buf;
+long file_buf_len;
+int height, width, channels, frames, fb_pitch, fb_size;
+unsigned char *fb;
+
+static bool read_file_to_buffer(char* file, unsigned char** buf, long *size) {
+    FILE *fp = fopen(file,"rb");
+    if (!fp) {
+        fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Could not read \"%s\"!\033[0m\n",file);
+        return false;
+    }
+    fseek(fp,0L,SEEK_END);
+    *size = ftell(fp);
+    fseek(fp,0L,SEEK_SET);
+    // printf("\033[1m[INF]\033[0m File \"%s\" read (size=%lu)! Allocating memory...\n",file,*size);
+    *buf = (unsigned char*)malloc(*size);
+    if (*buf == NULL) {
+        fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Not enough memory (buffer is NULL)!\033[0m\n");
+        return false;
+    }
+    if (fread(*buf,sizeof(char),*size,fp) != *size) {
+        fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Error while reading!\033[0m\n");
+        return false;
+    }
+    fclose(fp);
+    // printf("\033[1m[INF]\033[0m Memory allocated!\n");
+    return true;
+}
 
 int main(int argc, char *argv[]) {
 
@@ -57,20 +93,33 @@ int main(int argc, char *argv[]) {
             "[0m[38;2;128;97;80m:[0m[38;2;128;98;82m:[0m[38;2;127;96;81m:[0m[38;2;125;93;78m:[0m[38;2;116;84;69m;[0m[38;2;110;79;64m,[0m[38;2;109;77;62m,[0m[38;2;105;75;62m,[0m[38;2;103;75;61m,[0m[38;2;104;75;62m,[0m[38;2;106;77;63m,[0m[38;2;105;76;64m,[0m[38;2;104;76;64m,[0m[38;2;95;69;58m,[0m[38;2;83;60;51m'[0m[38;2;88;64;54m'[0m[38;2;88;64;54m'[0m[38;2;88;64;54m'[0m[38;2;85;62;53m'[0m[38;2;65;90;130m;[0m[38;2;74;61;62m'[0m[38;2;87;64;56m'[0m[38;2;70;51;45m.[0m[38;2;74;54;48m.[0m[38;2;102;75;66m,[0m[38;2;102;75;66m,[0m[38;2;100;79;77m,[0m[38;2;89;95;120m;[0m[38;2;76;95;133m;[0m[38;2;83;141;225mo[0m[38;2;80;145;239mo[0m[38;2;71;123;201mc[0m[38;2;93;110;143m:[0m[38;2;173;172;180mk[0m[38;2;182;181;190mO[0m[38;2;207;221;244mX[0m[38;2;206;173;165mO[0m[38;2;253;197;170mK[0m[38;2;252;196;169mK[0m[38;2;251;195;167mK[0m[38;2;251;195;167mK[0m[38;2;251;199;173mK[0m[38;2;208;163;141mk[0m[38;2;63;57;57m.[0m[38;2;71;59;55m.[0m[38;2;182;124;103mo[0m[38;2;175;122;108mo[0m[38;2;96;107;143m:[0m[38;2;69;115;181m:[0m[38;2;73;113;172m:[0m[38;2;196;164;158mk[0m[38;2;253;197;170mK[0m[38;2;253;197;170mK[0m[38;2;252;196;169mK[0m[38;2;250;194;167mK[0m[38;2;248;192;164mK[0m[38;2;243;186;157m0[0m[38;2;236;178;149m0[0m[38;2;230;170;141mO[0m[38;2;169;126;106mo[0m[38;2;150;106;89mc[0m[38;2;187;128;104mo[0m[38;2;152;115;106ml[0m[38;2;177;175;185mk[0m[38;2;164;162;172mx[0m[38;2;111;125;163ml[0m[38;2;63;90;143m;[0m[38;2;66;110;175m:[0m[38;2;64;106;170m:[0m[38;2;73;83;121m,[0m[38;2;95;107;141m:[0m[38;2;75;96;140m;[0m[38;2;62;92;146m;[0m[38;2;74;96;140m;[0m[38;2;112;116;141mc[0m[38;2;147;141;158mo[0m[38;2;160;152;171mx[0m[38;2;160;152;171mx[0m[38;2;161;152;171mx[0m[38;2;31;29;32m [0m[38;2;22;22;22m [0m[38;2;1;1;1m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m\n"
             "\n\033[34m\033[1mCopyright (C) konacode | \033[0m\033[34mhttps://konacode.com/\033[0m\n");
 
+    static std::string path = "";
+
     if (argc>0) {
         bool log_to_file, debug;
         for (int i = 1; i < argc; i++) {
-            static std::string arg = argv[i];
+            const static std::string arg = argv[i];
             if (arg == "-debug" || arg == "--debug" || arg == "-d") debug = true;
             else if (arg == "-log" || arg == "--log" || arg == "-l") log_to_file = true;
+            else if (arg == "-file" || arg == "--file" || arg == "-f") {
+                try {
+                    path = std::string(argv[++i]);
+                } catch (std::exception &e) {
+                    fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Unable to store \"%s\" into a std::string! Exception details: %s\033[0m\n",argv[i+1],e.what());
+                } catch (...) {
+                    fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Unable to store \"%s\" into a std::string!\033[0m\n",argv[i+1]);
+                }
+            }
             else {
                 printf("\033[33;1m[WRN]\033[0;33m Your command argument \"%s\" is invalid! Please use the following:\033[0m\n", argv[i]);
                 printf("\033[33;1m[WRN]\033[0;33m \"--debug\" or \"-debug\" or \"-d\" to enable the debug logger output.\033[0m\n");
                 printf("\033[33;1m[WRN]\033[0;33m \"--log\"   or \"-log\"   or \"-l\" to logging to file.\033[0m\n\n");
+                printf("\033[33;1m[WRN]\033[0;33m \"--file\" + path   or \"-file\" + path   or \"-f\" + path to select a custom file to load.\033[0m\n\n");
             }
         }
 
         logger::initialize(log_to_file,debug);
+
     } else {
         logger::initialize();
     }
@@ -104,10 +153,39 @@ int main(int argc, char *argv[]) {
         " Version "+std::to_string(konacore::version[0])+"."+std::to_string(konacore::version[1])+"."+std::to_string(konacore::version[2])+" by konacode | https://konacode.com/\n");
     
     logger::log("Initializing...");
+    if (!path.empty()) {
+        logger::log("Konata Dancer will be loading \""+path+"\".");
+    } else { path = "./konata.gif"; }
+
+    logger::log("Computing pixel data...",logger::dbg);
+    if (!read_file_to_buffer(path.data(), &file_buf, &file_buf_len)) {
+        logger::log("Could not load GIF data (read_file_to_buffer() failed)!",logger::exc);
+        exit(1);
+    }
+
+    logger::log("Sending data to STB:",logger::dbg);
+    logger::log("file_buf_len: "+std::to_string(file_buf_len),logger::dbg);
+    logger::log("Image: "+std::to_string(width)+" x "+std::to_string(height)+" pixels,",logger::dbg);
+    logger::log("Channels: "+std::to_string(channels),logger::dbg);
+    logger::log("Frames: "+std::to_string(frames),logger::dbg);
+    fb = stbi_load_gif_from_memory(file_buf, file_buf_len, NULL, &width, &height, &frames, &channels, 4);
+    if (!fb) {
+        logger::log("Could not load GIF data (stbi_load_gif_from_memory())! fb = nullptr",logger::exc);
+        exit(1);
+    }
+
+    fb_pitch = width * channels;
+    fb_size = fb_pitch * height;
+    // logger::log("GIF data:",logger::dbg);
+    // logger::log("Image: "+std::to_string(width)+" x "+std::to_string(height)+" pixels,",logger::dbg);
+    // logger::log("Channels: "+std::to_string(channels),logger::dbg);
+    // logger::log("Frames: "+std::to_string(frames),logger::dbg);
+    // logger::log("fb_pitch: "+std::to_string(fb_pitch),logger::dbg);
+    // logger::log("fb_size: "+std::to_string(fb_size),logger::dbg);
 
     logger::log("Creating window object...",logger::dbg);
 
-    konanix w;
+    konanix w(width,height);
     try {
         w.initialize();
     } catch (std::exception &e) {
@@ -123,11 +201,56 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-// void konanix::render() {
-//     logger::log("Starting rendering loop!");
-//     while(!glfwWindowShouldClose()) {
+void konanix::draw_frame() {
+    vkWaitForFences(g_device,1,&g_in_flight_fence,VK_TRUE,UINT64_MAX);
+    vkResetFences(g_device,1,&g_in_flight_fence);
 
-//         glfwPollEvents();
-//         // glfwSwapBuffers(wi);
-//     }
-// }
+    uint32_t image_index;
+    vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphore, VK_NULL_HANDLE, &image_index);
+
+    vkResetCommandBuffer(g_commandbuffer,0);
+    record_command_buffer(g_commandbuffer, image_index);
+    
+    const VkSemaphore wait_semaphores[] = {g_image_available_semaphore};
+    const VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    const VkSemaphore signal_semaphores[] = {g_render_finished_semaphore};
+
+    const VkSubmitInfo submit_info {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        VK_NULL_HANDLE,
+
+        1,
+        wait_semaphores,
+        wait_stages,
+
+        1,
+        &g_commandbuffer,
+
+        1,
+        signal_semaphores
+    };
+    if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fence) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
+        throw std::runtime_error("failed to submit draw command buffer");
+    } 
+    
+
+    const VkSwapchainKHR swapchains[] = {g_swapchain};
+
+    const VkPresentInfoKHR present_info {
+        VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        VK_NULL_HANDLE,
+
+        1,
+        signal_semaphores,
+
+        1,
+        swapchains,
+
+        &image_index,
+
+        nullptr
+    };
+    vkQueuePresentKHR(g_presentqueue,&present_info);
+
+};

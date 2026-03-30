@@ -23,7 +23,7 @@ public:
     void cleanup();
     void draw_frame();
     std::atomic<bool> running {true};
-    konanix();
+    konanix(const uint32_t width, const uint32_t height);
     ~konanix();
 private:
     void create_instance();

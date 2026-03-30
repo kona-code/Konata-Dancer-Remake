@@ -282,15 +282,24 @@ static VkShaderModule create_shader_module(const VkDevice device, const std::vec
 
 
 
-konanix::konanix() {
+konanix::konanix(const uint32_t width, const uint32_t height) {
     if (!glfwInit()) {
         logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
         throw std::runtime_error("failed to initialize glfw");
     }
+
+    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+
+    glfwWindowHint(GLFW_RED_BITS,mode->redBits);
+    glfwWindowHint(GLFW_GREEN_BITS,mode->greenBits);
+    glfwWindowHint(GLFW_BLUE_BITS,mode->blueBits);
+    glfwWindowHint(GLFW_REFRESH_RATE,mode->refreshRate);
+
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-    g_window = glfwCreateWindow(640, 480, "Konata Dancer", nullptr,nullptr);
+    g_window = glfwCreateWindow(width, height, "Konata Dancer", nullptr,nullptr);
     if (!g_window) {
         logger::log("<Vulkan> Failed to create a GLFW window!",logger::exc);
         glfwTerminate();
@@ -977,7 +986,6 @@ void konanix::create_commandpool() {
 void konanix::create_commandbuffer() {
     logger::log("<Vulkan> Allocating command buffer...",logger::dbg);
 
-    // "I dont care" (jerysub @ 29/03/2026 T14:52:31)
     const VkCommandBufferAllocateInfo alloc_info {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         VK_NULL_HANDLE,
@@ -1089,59 +1097,60 @@ void konanix::create_sync_objects() {
     }    
 }
 
-void konanix::draw_frame() {
-    vkWaitForFences(g_device,1,&g_in_flight_fence,VK_TRUE,UINT64_MAX);
-    vkResetFences(g_device,1,&g_in_flight_fence);
+// moved to core
+// void konanix::draw_frame() {
+//     vkWaitForFences(g_device,1,&g_in_flight_fence,VK_TRUE,UINT64_MAX);
+//     vkResetFences(g_device,1,&g_in_flight_fence);
 
-    uint32_t image_index;
-    vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphore, VK_NULL_HANDLE, &image_index);
+//     uint32_t image_index;
+//     vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphore, VK_NULL_HANDLE, &image_index);
 
-    vkResetCommandBuffer(g_commandbuffer,0);
-    record_command_buffer(g_commandbuffer, image_index);
+//     vkResetCommandBuffer(g_commandbuffer,0);
+//     record_command_buffer(g_commandbuffer, image_index);
     
-    const VkSemaphore wait_semaphores[] = {g_image_available_semaphore};
-    const VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    const VkSemaphore signal_semaphores[] = {g_render_finished_semaphore};
+//     const VkSemaphore wait_semaphores[] = {g_image_available_semaphore};
+//     const VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+//     const VkSemaphore signal_semaphores[] = {g_render_finished_semaphore};
 
-    const VkSubmitInfo submit_info {
-        VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        VK_NULL_HANDLE,
+//     const VkSubmitInfo submit_info {
+//         VK_STRUCTURE_TYPE_SUBMIT_INFO,
+//         VK_NULL_HANDLE,
 
-        1,
-        wait_semaphores,
-        wait_stages,
+//         1,
+//         wait_semaphores,
+//         wait_stages,
 
-        1,
-        &g_commandbuffer,
+//         1,
+//         &g_commandbuffer,
 
-        1,
-        signal_semaphores
-    };
-    if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fence) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
-        throw std::runtime_error("failed to submit draw command buffer");
-    } 
+//         1,
+//         signal_semaphores
+//     };
+//     if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fence) != VK_SUCCESS) {
+//         logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
+//         throw std::runtime_error("failed to submit draw command buffer");
+//     } 
     
 
-    const VkSwapchainKHR swapchains[] = {g_swapchain};
+//     const VkSwapchainKHR swapchains[] = {g_swapchain};
 
-    const VkPresentInfoKHR present_info {
-        VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        VK_NULL_HANDLE,
+//     const VkPresentInfoKHR present_info {
+//         VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+//         VK_NULL_HANDLE,
 
-        1,
-        signal_semaphores,
+//         1,
+//         signal_semaphores,
 
-        1,
-        swapchains,
+//         1,
+//         swapchains,
 
-        &image_index,
+//         &image_index,
 
-        nullptr
-    };
-    vkQueuePresentKHR(g_presentqueue,&present_info);
+//         nullptr
+//     };
+//     vkQueuePresentKHR(g_presentqueue,&present_info);
 
-};
+// };
 
 void konanix::recreate_swap_chain() {
 
