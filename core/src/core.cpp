@@ -9,9 +9,11 @@
 #include <stdlib.h>
 #include <vulkan/vulkan_core.h>
 
-#define STB_ONLY_GIF
-#define STB_IMAGE_IMPLEMENTATION
-#include "./stb_image.h"
+// #define STB_ONLY_GIF
+// #define STB_IMAGE_IMPLEMENTATION
+// #include "./stb_image.h"
+// #include <ktx.h>
+
 // #include <signal.h>
 
 // #include <GLFW/glfw3.h>
@@ -22,22 +24,22 @@ long file_buf_len;
 int height, width, channels, frames, fb_pitch, fb_size;
 unsigned char *fb;
 
-static bool read_file_to_buffer(char* file, unsigned char** buf, long *size) {
+static bool read_file_to_buffer(char* file) {
     FILE *fp = fopen(file,"rb");
     if (!fp) {
         fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Could not read \"%s\"!\033[0m\n",file);
         return false;
     }
     fseek(fp,0L,SEEK_END);
-    *size = ftell(fp);
+    file_buf_len = ftell(fp);
     fseek(fp,0L,SEEK_SET);
     // printf("\033[1m[INF]\033[0m File \"%s\" read (size=%lu)! Allocating memory...\n",file,*size);
-    *buf = (unsigned char*)malloc(*size);
-    if (*buf == NULL) {
+    file_buf = (unsigned char*)malloc(file_buf_len);
+    if (file_buf == NULL) {
         fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Not enough memory (buffer is NULL)!\033[0m\n");
         return false;
     }
-    if (fread(*buf,sizeof(char),*size,fp) != *size) {
+    if (fread(file_buf,sizeof(char),file_buf_len,fp) != file_buf_len) {
         fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Error while reading!\033[0m\n");
         return false;
     }
@@ -158,7 +160,7 @@ int main(int argc, char *argv[]) {
     } else { path = "./konata.gif"; }
 
     logger::log("Computing pixel data...",logger::dbg);
-    if (!read_file_to_buffer(path.data(), &file_buf, &file_buf_len)) {
+    if (!read_file_to_buffer(path.data()/*, &file_buf, &file_buf_len)*/)) {
         logger::log("Could not load GIF data (read_file_to_buffer() failed)!",logger::exc);
         exit(1);
     }
@@ -168,7 +170,7 @@ int main(int argc, char *argv[]) {
     logger::log("Image: "+std::to_string(width)+" x "+std::to_string(height)+" pixels,",logger::dbg);
     logger::log("Channels: "+std::to_string(channels),logger::dbg);
     logger::log("Frames: "+std::to_string(frames),logger::dbg);
-    fb = stbi_load_gif_from_memory(file_buf, file_buf_len, NULL, &width, &height, &frames, &channels, 4);
+    // fb = stbi_load_gif_from_memory(file_buf, file_buf_len, NULL, &width, &height, &frames, &channels, 4);
     if (!fb) {
         logger::log("Could not load GIF data (stbi_load_gif_from_memory())! fb = nullptr",logger::exc);
         exit(1);

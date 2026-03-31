@@ -1,9 +1,24 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(konacode_app LANGUAGES CXX)
+project(konacode LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# ---------------------------------------------------------------------------
+# vulkan KTX-software
+# ---------------------------------------------------------------------------
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+set(KTX_FEATURE_TOOLS OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_KTX1 ON CACHE BOOL "" FORCE)
+set(KTX_FEATURE_KTX2 OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_VK_UPLOAD ON CACHE BOOL "" FORCE)
+set(KTX_FEATURE_ASTC OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_BASISU OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libktx/lib ktx)
+
 
 # ---------------------------------------------------------------------------
 # sources
@@ -11,6 +26,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 file(GLOB_RECURSE APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
 )
+
+# do not include KTX sources
+list(FILTER APP_SOURCES EXCLUDE REGEX ".*/src/third_party/.*")
 
 set(SHADER_ROOT "${CMAKE_CURRENT_LIST_DIR}/shaders/compiled")
 
@@ -43,7 +61,10 @@ target_link_libraries(konacode
     glfw
     CURL::libcurl
     Threads::Threads
+    ktx
 )
+
+target_compile_definitions(konacode PRIVATE KHRONOS_STATIC) # static link
 
 if(UNIX AND NOT APPLE)
   set_target_properties(konacode PROPERTIES
