@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <vector>
 #include <vulkan/vulkan.h>
 #include <atomic>
@@ -25,6 +26,11 @@ public:
     std::atomic<bool> running {true};
     konanix(const uint32_t width, const uint32_t height);
     ~konanix();
+
+
+    void create_gif_image(uint32_t width, uint32_t height);
+    VkDevice get_device() { return g_device; };
+    
 private:
     void create_instance();
     void create_device();

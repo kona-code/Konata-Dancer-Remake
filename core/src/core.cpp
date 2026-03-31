@@ -19,33 +19,149 @@
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
 
-unsigned char* file_buf;
-long file_buf_len;
-int height, width, channels, frames, fb_pitch, fb_size;
-unsigned char *fb;
+struct GifFrame {
+    std::vector<uint8_t> rgba; // w*h *4
+    uint32_t delay_ms;
+};
 
-static bool read_file_to_buffer(char* file) {
-    FILE *fp = fopen(file,"rb");
-    if (!fp) {
-        fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Could not read \"%s\"!\033[0m\n",file);
-        return false;
+int width, height;
+
+VkDevice device = VK_NULL_HANDLE;
+VkImage g_gif_image = VK_NULL_HANDLE;
+VkDeviceMemory g_gif_image_memory = VK_NULL_HANDLE;
+VkImageView g_gif_image_view = VK_NULL_HANDLE;
+VkSampler g_gif_sampler = VK_NULL_HANDLE;
+
+static uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties, VkPhysicalDevice device) {
+    VkPhysicalDeviceMemoryProperties mem_properties {};
+    vkGetPhysicalDeviceMemoryProperties(device,&mem_properties);
+
+    for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
+        if ((type_filter & (1u << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
     }
-    fseek(fp,0L,SEEK_END);
-    file_buf_len = ftell(fp);
-    fseek(fp,0L,SEEK_SET);
-    // printf("\033[1m[INF]\033[0m File \"%s\" read (size=%lu)! Allocating memory...\n",file,*size);
-    file_buf = (unsigned char*)malloc(file_buf_len);
-    if (file_buf == NULL) {
-        fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Not enough memory (buffer is NULL)!\033[0m\n");
-        return false;
+    throw std::runtime_error("failed to find a suitable memory type");
+}
+
+static void create_image(VkPhysicalDevice p_device, VkDevice device, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, 
+                        VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory) {
+    const VkImageCreateInfo image_info {
+        VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        VK_IMAGE_TYPE_2D,
+        format,
+        {width,height,1},
+        1,
+        1,
+        VK_SAMPLE_COUNT_1_BIT,
+        tiling,
+        usage,
+        VK_SHARING_MODE_EXCLUSIVE,
+        0,
+        nullptr,
+        VK_IMAGE_LAYOUT_UNDEFINED
+    };
+
+    if (vkCreateImage(device,&image_info,nullptr,&image) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create image");
     }
-    if (fread(file_buf,sizeof(char),file_buf_len,fp) != file_buf_len) {
-        fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Error while reading!\033[0m\n");
-        return false;
+
+    VkMemoryRequirements mem_requirements{};
+    vkGetImageMemoryRequirements(device, image, &mem_requirements);
+
+    const VkMemoryAllocateInfo alloc_info{
+        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        VK_NULL_HANDLE,
+        mem_requirements.size,
+        find_memory_type(mem_requirements.memoryTypeBits, properties, p_device)
+    };
+
+    if (vkAllocateMemory(device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
+        vkDestroyImage(device,image,nullptr);
+        image = VK_NULL_HANDLE;
+        throw std::runtime_error("failed to bind image memory");
     }
-    fclose(fp);
-    // printf("\033[1m[INF]\033[0m Memory allocated!\n");
-    return true;
+}
+
+static VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format) {
+    const VkImageViewCreateInfo view_info {
+        VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        image,
+        VK_IMAGE_VIEW_TYPE_2D,
+        format,
+        {
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY
+        },
+        {
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0,
+            1,
+            0,
+            1
+        }
+    };
+
+    VkImageView image_view = VK_NULL_HANDLE;
+    if (vkCreateImageView(device,&view_info,nullptr,&image_view) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create image view");
+    } 
+
+    return image_view;
+}
+
+static VkSampler create_sampler(VkPhysicalDevice p_device, VkDevice device) {
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(p_device,&properties);
+
+    const VkSamplerCreateInfo sampler_info {
+        VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        VK_FILTER_LINEAR,
+        VK_FILTER_LINEAR,
+        VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        0.0f,
+        VK_FALSE,
+        1.0f,
+        VK_FALSE,
+        VK_COMPARE_OP_ALWAYS,
+        0.0f,
+        0.0f,
+        VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        VK_FALSE
+    };
+
+    VkSampler sampler = VK_NULL_HANDLE;
+    if (vkCreateSampler(device,&sampler_info,nullptr,&sampler) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create sampler");
+    }
+    return sampler;
+}
+
+void konanix::create_gif_image(uint32_t width, uint32_t height) {
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+
+    create_image(g_physicaldevice, g_device,width,height,format,
+    VK_IMAGE_TILING_OPTIMAL,
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    g_gif_image,g_gif_image_memory);
+
+    g_gif_image_view = create_image_view(g_device, g_gif_image, format);
+    g_gif_sampler = create_sampler(g_physicaldevice, g_device);
 }
 
 int main(int argc, char *argv[]) {
@@ -159,31 +275,7 @@ int main(int argc, char *argv[]) {
         logger::log("Konata Dancer will be loading \""+path+"\".");
     } else { path = "./konata.gif"; }
 
-    logger::log("Computing pixel data...",logger::dbg);
-    if (!read_file_to_buffer(path.data()/*, &file_buf, &file_buf_len)*/)) {
-        logger::log("Could not load GIF data (read_file_to_buffer() failed)!",logger::exc);
-        exit(1);
-    }
-
-    logger::log("Sending data to STB:",logger::dbg);
-    logger::log("file_buf_len: "+std::to_string(file_buf_len),logger::dbg);
-    logger::log("Image: "+std::to_string(width)+" x "+std::to_string(height)+" pixels,",logger::dbg);
-    logger::log("Channels: "+std::to_string(channels),logger::dbg);
-    logger::log("Frames: "+std::to_string(frames),logger::dbg);
-    // fb = stbi_load_gif_from_memory(file_buf, file_buf_len, NULL, &width, &height, &frames, &channels, 4);
-    if (!fb) {
-        logger::log("Could not load GIF data (stbi_load_gif_from_memory())! fb = nullptr",logger::exc);
-        exit(1);
-    }
-
-    fb_pitch = width * channels;
-    fb_size = fb_pitch * height;
-    // logger::log("GIF data:",logger::dbg);
-    // logger::log("Image: "+std::to_string(width)+" x "+std::to_string(height)+" pixels,",logger::dbg);
-    // logger::log("Channels: "+std::to_string(channels),logger::dbg);
-    // logger::log("Frames: "+std::to_string(frames),logger::dbg);
-    // logger::log("fb_pitch: "+std::to_string(fb_pitch),logger::dbg);
-    // logger::log("fb_size: "+std::to_string(fb_size),logger::dbg);
+    
 
     logger::log("Creating window object...",logger::dbg);
 
@@ -194,12 +286,40 @@ int main(int argc, char *argv[]) {
         logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
     }
 
+    w.create_gif_image(640, 480);
+    // TODO:
+    // add descriptor set for texture
+    // update fragment shader (sample gif image)
+    // per-frame upload to texture
+    // bind descriptor
+    // implement giflib
+
     while (!glfwWindowShouldClose(w.g_window)) {
         glfwPollEvents();
         w.draw_frame();
         
     }
 
+    device = w.get_device();
+    if (g_gif_sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, g_gif_sampler, nullptr);
+        g_gif_sampler = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image_view != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, g_gif_image_view, nullptr);
+        g_gif_image_view = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image != VK_NULL_HANDLE) {
+        vkDestroyImage(device, g_gif_image, nullptr);
+        g_gif_image = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image_memory != VK_NULL_HANDLE) {
+        vkFreeMemory(device, g_gif_image_memory, nullptr);
+        g_gif_image_memory = VK_NULL_HANDLE;
+    }
     return 0;
 }
 
