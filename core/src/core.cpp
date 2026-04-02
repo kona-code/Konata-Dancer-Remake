@@ -151,6 +151,85 @@ static VkSampler create_sampler(VkPhysicalDevice p_device, VkDevice device) {
     return sampler;
 }
 
+void konanix::create_descriptor_set() {
+    VkDescriptorSetLayout layouts[] = {g_descriptor_set_layout};
+
+    const VkDescriptorSetAllocateInfo alloc_info {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        VK_NULL_HANDLE,
+
+        g_descriptor_pool,
+        1,
+        layouts
+    };
+    if (vkAllocateDescriptorSets(g_device,&alloc_info,&g_descriptor_set) != VK_SUCCESS) {
+        throw std::runtime_error("failed to allocate descriptor set");
+    }
+
+    const VkDescriptorImageInfo image_info {
+        g_gif_sampler,
+        g_gif_image_view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    const VkWriteDescriptorSet write {
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        VK_NULL_HANDLE,
+
+        g_descriptor_set,
+        0,
+        0,
+        1,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        &image_info,
+        VK_NULL_HANDLE,
+        VK_NULL_HANDLE
+    };
+}
+
+void konanix::create_descriptor_pool() {
+    constexpr VkDescriptorPoolSize pool_size {
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1
+    };
+
+    const VkDescriptorPoolCreateInfo pool_info {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        1,
+        1,
+        &pool_size
+    };
+
+    if (vkCreateDescriptorPool(g_device,&pool_info,nullptr,&g_descriptor_pool) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create descriptor pool");
+    }
+}
+
+void konanix::create_descriptor_set_layout() {
+    constexpr VkDescriptorSetLayoutBinding gif_binding {
+        0,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+
+    const VkDescriptorSetLayoutCreateInfo layout_info {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        1,
+        &gif_binding
+    };
+
+    if (vkCreateDescriptorSetLayout(g_device,&layout_info,nullptr,&g_descriptor_set_layout) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create descriptor set");
+    }
+}
+
 void konanix::create_gif_image(uint32_t width, uint32_t height) {
     constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -287,6 +366,8 @@ int main(int argc, char *argv[]) {
     }
 
     w.create_gif_image(640, 480);
+    VkDescriptorSet descriptor_set;
+
     // TODO:
     // add descriptor set for texture
     // update fragment shader (sample gif image)

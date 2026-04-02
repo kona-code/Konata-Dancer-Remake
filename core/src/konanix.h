@@ -47,6 +47,9 @@ private:
     void recreate_swap_chain();
 
     void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
+    void create_descriptor_set();
+    void create_descriptor_pool();
+    void create_descriptor_set_layout();
 
     constexpr static short version[3] = {1, 0, 0};
 
@@ -76,4 +79,8 @@ protected:
     VkSemaphore g_image_available_semaphore;
     VkSemaphore g_render_finished_semaphore;
     VkFence g_in_flight_fence;
+
+    VkDescriptorSet g_descriptor_set;
+    VkDescriptorSetLayout g_descriptor_set_layout;
+    VkDescriptorPool g_descriptor_pool;
 };
