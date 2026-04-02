@@ -343,6 +343,15 @@ void konanix::initialize() {
 }
 
 void konanix::cleanup() {
+
+    if (g_descriptor_set_layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(g_device,g_descriptor_set_layout,nullptr);
+    }
+
+    if (g_descriptor_pool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(g_device,g_descriptor_pool,nullptr);
+    }
+    
     if (g_image_available_semaphore!=VK_NULL_HANDLE) {
         vkDestroySemaphore(g_device,g_image_available_semaphore,nullptr);
         logger::log("<Vulkan> Semaphore \"g_image_available_semaphore\" destroyed!",logger::dbg);
