@@ -365,11 +365,9 @@ int main(int argc, char *argv[]) {
         logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
     }
 
-    w.create_gif_image(640, 480);
-    VkDescriptorSet descriptor_set;
+    // w.create_gif_image(640, 480);
 
     // TODO:
-    // add descriptor set for texture
     // update fragment shader (sample gif image)
     // per-frame upload to texture
     // bind descriptor

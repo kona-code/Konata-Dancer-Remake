@@ -324,6 +324,12 @@ void konanix::initialize() {
     create_swap_chain();
     create_image_views();
     create_render_pass();
+    create_descriptor_pool();
+    create_descriptor_set_layout();
+
+    create_gif_image(640, 480);
+
+    create_descriptor_set();
     create_graphics_pipeline();
     create_framebuffers();
     create_commandpool();
@@ -797,13 +803,15 @@ void konanix::create_graphics_pipeline() {
         }
     };
 
-    constexpr VkPipelineLayoutCreateInfo pipeline_layout_info {
+    const VkPipelineLayoutCreateInfo pipeline_layout_info {
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         VK_NULL_HANDLE,
         0,
 
-        0,
-        nullptr,
+        // 0,
+        // nullptr,
+        1,
+        &g_descriptor_set_layout,
         0,
         nullptr
     };
