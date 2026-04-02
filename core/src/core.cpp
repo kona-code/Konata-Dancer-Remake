@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <vulkan/vulkan_core.h>
 
+#include <gif_lib.h>
+
 // #define STB_ONLY_GIF
 // #define STB_IMAGE_IMPLEMENTATION
 // #include "./stb_image.h"
@@ -352,24 +354,34 @@ int main(int argc, char *argv[]) {
         logger::log("Konata Dancer will be loading \""+path+"\".");
     } else { path = "./konata.gif"; }
 
+    GifFileType* sprite;
+    {
+        int err = 0;
+        sprite = DGifOpenFileName(path.c_str(),&err);
+        if (err != 0) {
+            logger::log("DGifOpenFileName failed! Code: "+std::to_string(err),logger::exc);
+            exit(err);
+        }
     
+    }
+
+    logger::log("Fetched GIF data:",logger::dbg);
+    logger::log("Size: "+std::to_string(sprite->SWidth)+" x "+std::to_string(sprite->SHeight),logger::dbg);
+    logger::log("Image count: "+std::to_string(sprite->ImageCount),logger::dbg);
 
     logger::log("Creating window object...",logger::dbg);
 
-    konanix w(640,480);
+    konanix w(sprite->SWidth,sprite->SHeight);
     try {
         w.initialize();
     } catch (std::exception &e) {
         logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
     }
 
-    // w.create_gif_image(640, 480);
-
     // TODO:
     // update fragment shader (sample gif image)
     // per-frame upload to texture
     // bind descriptor
-    // implement giflib
 
     while (!glfwWindowShouldClose(w.g_window)) {
         glfwPollEvents();

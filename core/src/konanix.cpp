@@ -296,12 +296,14 @@ konanix::konanix(uint32_t w, uint32_t h) {
     glfwWindowHint(GLFW_GREEN_BITS,mode->greenBits);
     glfwWindowHint(GLFW_BLUE_BITS,mode->blueBits);
     glfwWindowHint(GLFW_REFRESH_RATE,mode->refreshRate);
+    logger::log("<Vulkan> Renderer will output "+std::to_string(mode->refreshRate)+"FPS",logger::dbg);
+    // logger::log("<Vulkan> Window will be created with size params: "+std::to_string(width)+"x"+std::to_string(height),logger::dbg);
 
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-    g_window = glfwCreateWindow(width, height, "Konata Dancer", nullptr,nullptr);
+    g_window = glfwCreateWindow(width,height, "Konata Dancer", nullptr,nullptr);
     if (!g_window) {
         logger::log("<Vulkan> Failed to create a GLFW window!",logger::exc);
         glfwTerminate();

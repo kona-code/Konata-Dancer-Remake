@@ -28,6 +28,7 @@ find_package(Vulkan REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(GIF REQUIRED)
 
 # ---------------------------------------------------------------------------
 # includes
@@ -46,6 +47,7 @@ target_link_libraries(konacode
     glfw
     CURL::libcurl
     Threads::Threads
+    GIF::GIF
 )
 
 target_compile_definitions(konacode PRIVATE KHRONOS_STATIC) # static link
