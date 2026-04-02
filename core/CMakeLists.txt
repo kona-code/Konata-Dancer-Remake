@@ -6,21 +6,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
-# vulkan KTX-software
-# ---------------------------------------------------------------------------
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-
-set(KTX_FEATURE_TOOLS OFF CACHE BOOL "" FORCE)
-set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
-set(KTX_FEATURE_KTX1 ON CACHE BOOL "" FORCE)
-set(KTX_FEATURE_KTX2 OFF CACHE BOOL "" FORCE)
-set(KTX_FEATURE_VK_UPLOAD ON CACHE BOOL "" FORCE)
-set(KTX_FEATURE_ASTC OFF CACHE BOOL "" FORCE)
-set(KTX_FEATURE_BASISU OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/libktx/lib ktx)
-
-
-# ---------------------------------------------------------------------------
 # sources
 # ---------------------------------------------------------------------------
 file(GLOB_RECURSE APP_SOURCES
@@ -61,7 +46,6 @@ target_link_libraries(konacode
     glfw
     CURL::libcurl
     Threads::Threads
-    ktx
 )
 
 target_compile_definitions(konacode PRIVATE KHRONOS_STATIC) # static link

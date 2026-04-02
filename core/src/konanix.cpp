@@ -282,7 +282,9 @@ static VkShaderModule create_shader_module(const VkDevice device, const std::vec
 
 
 
-konanix::konanix(const uint32_t width, const uint32_t height) {
+konanix::konanix(uint32_t w, uint32_t h) {
+    width = w;
+    height = h;
     if (!glfwInit()) {
         logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
         throw std::runtime_error("failed to initialize glfw");
@@ -327,7 +329,7 @@ void konanix::initialize() {
     create_descriptor_pool();
     create_descriptor_set_layout();
 
-    create_gif_image(640, 480);
+    create_gif_image(width, height);
 
     create_descriptor_set();
     create_graphics_pipeline();

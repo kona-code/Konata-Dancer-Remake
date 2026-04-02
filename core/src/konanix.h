@@ -24,13 +24,13 @@ public:
     void cleanup();
     void draw_frame();
     std::atomic<bool> running {true};
-    konanix(const uint32_t width, const uint32_t height);
+    konanix(uint32_t width = 1280, uint32_t height = 640);
     ~konanix();
 
 
     void create_gif_image(uint32_t width, uint32_t height);
     VkDevice get_device() { return g_device; };
-    
+    int width, height;
 private:
     void create_instance();
     void create_device();

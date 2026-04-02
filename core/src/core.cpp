@@ -24,8 +24,6 @@ struct GifFrame {
     uint32_t delay_ms;
 };
 
-int width, height;
-
 VkDevice device = VK_NULL_HANDLE;
 VkImage g_gif_image = VK_NULL_HANDLE;
 VkDeviceMemory g_gif_image_memory = VK_NULL_HANDLE;
@@ -358,7 +356,7 @@ int main(int argc, char *argv[]) {
 
     logger::log("Creating window object...",logger::dbg);
 
-    konanix w(width,height);
+    konanix w(640,480);
     try {
         w.initialize();
     } catch (std::exception &e) {
