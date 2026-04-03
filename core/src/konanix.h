@@ -31,6 +31,7 @@ public:
     void create_gif_image(uint32_t width, uint32_t height);
     VkDevice get_device() { return g_device; };
     uint32_t width, height;
+    VkDeviceSize image_size;
 private:
     void create_instance();
     void create_device();
@@ -50,6 +51,11 @@ private:
     void create_descriptor_set();
     void create_descriptor_pool();
     void create_descriptor_set_layout();
+
+    VkCommandBuffer begin_single_time_commands();
+    void end_single_time_commands(VkCommandBuffer command_buffer);
+    void copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height);
+
 
     constexpr static short version[3] = {1, 0, 0};
 

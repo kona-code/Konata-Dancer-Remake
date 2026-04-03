@@ -12,8 +12,8 @@
 #include <gif_lib.h>
 
 // #define STB_ONLY_GIF
-// #define STB_IMAGE_IMPLEMENTATION
-// #include "./stb_image.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "./third_party/stb_image.h"
 // #include <ktx.h>
 
 // #include <signal.h>
@@ -354,29 +354,48 @@ int main(int argc, char *argv[]) {
         logger::log("Konata Dancer will be loading \""+path+"\".");
     } else { path = "./konata.gif"; }
 
-    GifFileType* sprite;
-    {
-        int err = 0;
-        sprite = DGifOpenFileName(path.c_str(),&err);
-        if (err != 0) {
-            logger::log("DGifOpenFileName failed! Code: "+std::to_string(err),logger::exc);
-            exit(err);
-        }
+    // GifFileType* sprite;
+    // {
+    //     int err = 0;
+    //     sprite = DGifOpenFileName(path.c_str(),&err);
+    //     if (err != 0) {
+    //         logger::log("DGifOpenFileName failed! Code: "+std::to_string(err),logger::exc);
+    //         exit(err);
+    //     }
     
-    }
+    // }
 
-    logger::log("Fetched GIF data:",logger::dbg);
-    logger::log("Size: "+std::to_string(sprite->SWidth)+" x "+std::to_string(sprite->SHeight),logger::dbg);
-    logger::log("Image count: "+std::to_string(sprite->ImageCount),logger::dbg);
+    // logger::log("Fetched GIF data:",logger::dbg);
+    // logger::log("Size: "+std::to_string(sprite->SWidth)+" x "+std::to_string(sprite->SHeight),logger::dbg);
+    // logger::log("Image count: "+std::to_string(sprite->ImageCount),logger::dbg);
+
+    logger::log("Getting pixel data from STB...",logger::dbg);
+    int iw,ih,ic;
+    // stbi_uc *pxs = stbi_load(path.c_str(),&sprite->SWidth,&sprite->SHeight,&channels,STBI_rgb_alpha);
+    stbi_uc *pxs = stbi_load(path.c_str(),&iw,&ih,&ic,STBI_rgb_alpha);
+    if (!pxs) {
+        logger::log("Failed to load texture file \""+path+"\"!",logger::exc);
+        exit(1);
+    }
 
     logger::log("Creating window object...",logger::dbg);
 
-    konanix w(sprite->SWidth,sprite->SHeight);
+    // konanix w(sprite->SWidth,sprite->SHeight);
+    konanix w(iw,ih);
+    w.image_size = iw*ih*4;
     try {
         w.initialize();
     } catch (std::exception &e) {
         logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
+        exit(1);
     }
+
+
+
+
+
+    // w.create_gif_image(iw,ih);
+    stbi_image_free(pxs);
 
     // TODO:
     // update fragment shader (sample gif image)

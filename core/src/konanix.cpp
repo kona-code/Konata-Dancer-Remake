@@ -279,6 +279,84 @@ static VkShaderModule create_shader_module(const VkDevice device, const std::vec
 }
 
 
+VkCommandBuffer konanix::begin_single_time_commands() {
+    const VkCommandBufferAllocateInfo alloc_info {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        VK_NULL_HANDLE,
+
+        g_commandpool,
+        VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        1
+    };
+    
+    VkCommandBuffer command_buffer;
+    vkAllocateCommandBuffers(g_device, &alloc_info, &command_buffer);
+    
+    VkCommandBufferBeginInfo begin_info{
+    VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    VK_NULL_HANDLE,
+    VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    VK_NULL_HANDLE
+    };
+
+    vkBeginCommandBuffer(command_buffer, &begin_info);
+    return command_buffer;
+}
+
+void konanix::end_single_time_commands(VkCommandBuffer buffer) {
+    vkEndCommandBuffer(buffer);
+    
+    const VkSubmitInfo submitInfo {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        VK_NULL_HANDLE,
+
+        0,
+        VK_NULL_HANDLE,
+        0,
+
+        1,
+        &buffer,
+
+        0,
+        VK_NULL_HANDLE
+    };
+
+    vkQueueSubmit(g_graphicsqueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(g_graphicsqueue);
+    vkFreeCommandBuffers(g_device, g_commandpool, 1, &buffer);
+}
+
+void konanix::copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height) {
+    VkCommandBuffer command_buffer = begin_single_time_commands();
+
+    const VkBufferImageCopy region {
+        0,
+        0,
+        0,
+        {
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0,
+            0,
+            1
+        },
+        {
+            0,
+            0,
+            0,
+        },
+        {
+            width,
+            height,
+            1
+        }
+    };
+
+    vkCmdCopyBufferToImage(command_buffer,buffer,image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
+
+    end_single_time_commands(command_buffer);
+}
+
+
 
 
 
@@ -331,6 +409,25 @@ void konanix::initialize() {
     create_render_pass();
     create_descriptor_pool();
     create_descriptor_set_layout();
+
+    {
+        VkBuffer stagging_buffer;
+        const VkBufferCreateInfo buffer_info {
+            VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            VK_NULL_HANDLE,
+            // VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            image_size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_SHARING_MODE_EXCLUSIVE,
+            0,
+            nullptr
+        };
+        if (vkCreateBuffer(g_device,&buffer_info,nullptr,&stagging_buffer) != VK_SUCCESS) {
+            logger::log("<Vulkan> Failed to allocate buffer!",logger::exc);
+            throw std::runtime_error("failed to allocate buffer");
+        }
+    }
 
     create_gif_image(width, height);
 
