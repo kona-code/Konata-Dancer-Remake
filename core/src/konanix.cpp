@@ -218,10 +218,10 @@ static VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR &capabilitie
     if (capabilities.currentExtent.width!=std::numeric_limits<uint32_t>::max() || capabilities.currentExtent.height!=std::numeric_limits<uint32_t>::max()) {
         return capabilities.currentExtent;
     } else {
-        int width, height;
-        glfwGetFramebufferSize(window, &width, &height);
+        int w, h;
+        glfwGetFramebufferSize(window, &w, &h);
 
-        VkExtent2D actual = {static_cast<uint32_t>(width),static_cast<uint32_t>(height)};
+        VkExtent2D actual = {static_cast<uint32_t>(w),static_cast<uint32_t>(h)};
         actual.width = std::clamp(actual.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
         actual.height = std::clamp(actual.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
 
@@ -282,7 +282,7 @@ static VkShaderModule create_shader_module(const VkDevice device, const std::vec
 
 
 
-konanix::konanix(uint32_t w, uint32_t h) {
+konanix::konanix(const uint32_t &w, const uint32_t &h) {
     width = w;
     height = h;
     if (!glfwInit()) {
@@ -309,6 +309,7 @@ konanix::konanix(uint32_t w, uint32_t h) {
         glfwTerminate();
         throw std::runtime_error("failed to create a glfw window");
     }
+    glfwSetWindowSize(g_window,width,height);
 }
 
 konanix::~konanix() {

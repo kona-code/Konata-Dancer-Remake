@@ -24,7 +24,7 @@ public:
     void cleanup();
     void draw_frame();
     std::atomic<bool> running {true};
-    konanix(uint32_t width = 1280, uint32_t height = 640);
+    konanix(const uint32_t &width = 1280, const uint32_t &height = 640);
     ~konanix();
 
 
