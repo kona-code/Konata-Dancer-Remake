@@ -2,6 +2,7 @@
 #include "konanix.h"
 #include "logger.h"
 #include <GLFW/glfw3.h>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
@@ -390,10 +391,26 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_buffer_memory;
+    const VkBufferCreateInfo buffer_info {
+        VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        VK_NULL_HANDLE,
+        // VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        w.image_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_SHARING_MODE_EXCLUSIVE,
+        0,
+        nullptr
+    };
 
-
-
-
+    w.create_buffer(w.image_size,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,staging_buffer,staging_buffer_memory);
+    
+    vkMapMemory(w.get_device(),staging_buffer_memory,0,w.image_size,0,&w.pxdata);
+    memcpy(w.pxdata,pxs,static_cast<size_t>(w.image_size));
+    vkUnmapMemory(w.get_device(),staging_buffer_memory);
+    logger::log("GIF pixel data stored!",logger::dbg);
     // w.create_gif_image(iw,ih);
     stbi_image_free(pxs);
 

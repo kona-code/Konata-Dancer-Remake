@@ -356,13 +356,63 @@ void konanix::copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32
     end_single_time_commands(command_buffer);
 }
 
+uint32_t konanix::find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+    VkPhysicalDeviceMemoryProperties mem_properties;
+    vkGetPhysicalDeviceMemoryProperties(g_physicaldevice, &mem_properties);
+    
+    for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
+        if ((typeFilter & (1 << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+
+    logger::log("<Vulkan> Failed to find suitable memory type!",logger::exc);
+    throw std::runtime_error("failed to find suitable memory type");
+}
+
+void konanix::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &buffer_memory) {
+    const VkBufferCreateInfo buffer_info {
+        VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        size,
+        usage,
+        VK_SHARING_MODE_EXCLUSIVE
+    };
+
+    if (vkCreateBuffer(g_device,&buffer_info,nullptr,&buffer) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to create buffer!",logger::exc);
+        throw std::runtime_error("failed to create buffer");
+    }
+
+    VkMemoryRequirements mem_requirements;
+    vkGetBufferMemoryRequirements(g_device,buffer,&mem_requirements);
+
+    const VkMemoryAllocateInfo alloc_info {
+        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        VK_NULL_HANDLE,
+
+        mem_requirements.size,
+        find_memory_type(mem_requirements.memoryTypeBits, properties)
+    };
+
+    if (vkAllocateMemory(g_device, &alloc_info, nullptr, &buffer_memory) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to allocate memory!",logger::exc);
+        throw std::runtime_error("failed to allocate memory");
+    }
+
+    vkBindBufferMemory(g_device,buffer,buffer_memory,0);
+}
 
 
 
 
-konanix::konanix(const uint32_t &w, const uint32_t &h) {
-    width = w;
-    height = h;
+
+konanix::konanix(const uint32_t &w, const uint32_t &h)
+                : width(std::move(w)), height(std::move(h)) {
+    // width = w;
+    // height = h;
     if (!glfwInit()) {
         logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
         throw std::runtime_error("failed to initialize glfw");
@@ -409,25 +459,6 @@ void konanix::initialize() {
     create_render_pass();
     create_descriptor_pool();
     create_descriptor_set_layout();
-
-    {
-        VkBuffer stagging_buffer;
-        const VkBufferCreateInfo buffer_info {
-            VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            VK_NULL_HANDLE,
-            // VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            image_size,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VK_SHARING_MODE_EXCLUSIVE,
-            0,
-            nullptr
-        };
-        if (vkCreateBuffer(g_device,&buffer_info,nullptr,&stagging_buffer) != VK_SUCCESS) {
-            logger::log("<Vulkan> Failed to allocate buffer!",logger::exc);
-            throw std::runtime_error("failed to allocate buffer");
-        }
-    }
 
     create_gif_image(width, height);
 

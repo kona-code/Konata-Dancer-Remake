@@ -29,9 +29,11 @@ public:
 
 
     void create_gif_image(uint32_t width, uint32_t height);
-    VkDevice get_device() { return g_device; };
+    void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &buffer_memory);
+    VkDevice get_device() const { return g_device; };
     uint32_t width, height;
     VkDeviceSize image_size;
+    void* pxdata;
 private:
     void create_instance();
     void create_device();
@@ -55,7 +57,7 @@ private:
     VkCommandBuffer begin_single_time_commands();
     void end_single_time_commands(VkCommandBuffer command_buffer);
     void copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height);
-
+    uint32_t find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
     constexpr static short version[3] = {1, 0, 0};
 
