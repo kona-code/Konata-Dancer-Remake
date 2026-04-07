@@ -45,7 +45,7 @@ private:
     void create_graphics_pipeline();
     void create_framebuffers();
     void create_commandpool();
-    void create_commandbuffer();
+    void create_commandbuffers();
     void create_sync_objects();
     void recreate_swap_chain();
 
@@ -60,7 +60,7 @@ private:
     uint32_t find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
     constexpr static short version[3] = {1, 0, 0};
-
+    static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 protected:
     VkInstance g_instance;
     VkSurfaceKHR g_surface;
@@ -82,13 +82,18 @@ protected:
     VkPipeline g_graphics_pipeline;
 
     VkCommandPool g_commandpool;
-    VkCommandBuffer g_commandbuffer;
+    std::vector<VkCommandBuffer> g_commandbuffers;
 
-    VkSemaphore g_image_available_semaphore;
-    VkSemaphore g_render_finished_semaphore;
-    VkFence g_in_flight_fence;
+    // VkSemaphore g_image_available_semaphore;
+    // VkSemaphore g_render_finished_semaphore;
+    // VkFence g_in_flight_fence;
+    std::vector<VkSemaphore> g_image_available_semaphores;
+    std::vector<VkSemaphore> g_render_finished_semaphores;
+    std::vector<VkFence> g_in_flight_fences;
 
     VkDescriptorSet g_descriptor_set;
     VkDescriptorSetLayout g_descriptor_set_layout;
     VkDescriptorPool g_descriptor_pool;
+
+    uint32_t current_frame = 1;
 };

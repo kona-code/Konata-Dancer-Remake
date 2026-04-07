@@ -429,7 +429,7 @@ konanix::konanix(const uint32_t &w, const uint32_t &h)
 
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    // glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     g_window = glfwCreateWindow(width,height, "Konata Dancer", nullptr,nullptr);
     if (!g_window) {
@@ -466,7 +466,7 @@ void konanix::initialize() {
     create_graphics_pipeline();
     create_framebuffers();
     create_commandpool();
-    create_commandbuffer();
+    create_commandbuffers();
     create_sync_objects();
 
 }
@@ -481,19 +481,25 @@ void konanix::cleanup() {
         vkDestroyDescriptorPool(g_device,g_descriptor_pool,nullptr);
     }
     
-    if (g_image_available_semaphore!=VK_NULL_HANDLE) {
-        vkDestroySemaphore(g_device,g_image_available_semaphore,nullptr);
-        logger::log("<Vulkan> Semaphore \"g_image_available_semaphore\" destroyed!",logger::dbg);
-    }
-        
-    if (g_render_finished_semaphore!=VK_NULL_HANDLE) {
-        vkDestroySemaphore(g_device,g_render_finished_semaphore,nullptr);
-        logger::log("<Vulkan> Semaphore \"g_render_finished_semaphore\" destroyed!",logger::dbg);
-    }  
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        if (g_image_available_semaphores[i]!=VK_NULL_HANDLE) {
+            vkDestroySemaphore(g_device,g_image_available_semaphores[i],nullptr);
+            logger::log("<Vulkan> Semaphore \"g_image_available_semaphores["+std::to_string(i)+"]\" destroyed!",logger::dbg);
+        } else { logger::log("<Vulkan> Could not destroy semaphore \"g_image_available_semaphores["+std::to_string(i)+"]\"!",logger::wrn); }
 
-    if (g_in_flight_fence!=VK_NULL_HANDLE) {
-        vkDestroyFence(g_device,g_in_flight_fence,nullptr);
-        logger::log("<Vulkan> Fence \"g_in_flight_fence\" destroyed!",logger::dbg);
+        if (g_render_finished_semaphores[i]!=VK_NULL_HANDLE) {
+            vkDestroySemaphore(g_device,g_render_finished_semaphores[i],nullptr);
+            logger::log("<Vulkan> Semaphore \"g_render_finished_semaphores["+std::to_string(i)+"]\" destroyed!",logger::dbg);
+        } else { logger::log("<Vulkan> Could not destroy semaphore \"g_render_finished_semaphores["+std::to_string(i)+"]\"!",logger::wrn); }
+
+        if (g_in_flight_fences[i]!=VK_NULL_HANDLE) {
+            vkDestroyFence(g_device,g_in_flight_fences[i],nullptr);
+            logger::log("<Vulkan> Fence \"g_in_flight_fences["+std::to_string(i)+"]\" destroyed!",logger::dbg);
+        } else { logger::log("<Vulkan> Could not destroy fence \"g_in_flight_fences["+std::to_string(i)+"]\"!",logger::wrn); }
+
+        // vkDestroySemaphore(g_device, g_render_finished_semaphores[i], nullptr);
+        // vkDestroySemaphore(g_device, g_render_finished_semaphores[i], nullptr);
+        // vkDestroyFence(g_device, g_in_flight_fences[i], nullptr);
     }
 
     if (g_commandpool!=VK_NULL_HANDLE) {
@@ -578,7 +584,7 @@ void konanix::create_instance() {
         "konanix",
         VK_MAKE_VERSION(version[0],version[1],version[2]),
         
-        VK_API_VERSION_1_4
+        VK_API_VERSION_1_0
     };
 
     uint32_t extension_count = 0;
@@ -1133,8 +1139,9 @@ void konanix::create_commandpool() {
 
 }
 
-void konanix::create_commandbuffer() {
+void konanix::create_commandbuffers() {
     logger::log("<Vulkan> Allocating command buffer...",logger::dbg);
+    g_commandbuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
     const VkCommandBufferAllocateInfo alloc_info {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -1142,10 +1149,10 @@ void konanix::create_commandbuffer() {
         
         g_commandpool,
         VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        1
+        (uint32_t) g_commandbuffers.size()
     };
 
-    if (vkAllocateCommandBuffers(g_device,&alloc_info,&g_commandbuffer) != VK_SUCCESS) {
+    if (vkAllocateCommandBuffers(g_device,&alloc_info,g_commandbuffers.data()) != VK_SUCCESS) {
             logger::log("<Vulkan> Failed to allocate the command buffer!",logger::exc);
             throw std::runtime_error("failed to allocate command buffer");
     }
@@ -1220,6 +1227,10 @@ void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t imag
 }
 
 void konanix::create_sync_objects() {
+    g_image_available_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    g_render_finished_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    g_in_flight_fences.resize(MAX_FRAMES_IN_FLIGHT);
+
     constexpr VkSemaphoreCreateInfo semaphore_info {
         VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
         VK_NULL_HANDLE,
@@ -1232,19 +1243,21 @@ void konanix::create_sync_objects() {
         VK_FENCE_CREATE_SIGNALED_BIT
     };
 
-    if (vkCreateSemaphore(g_device,&semaphore_info,nullptr,&g_image_available_semaphore) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed create a semaphore!",logger::exc);
-        throw std::runtime_error("failed to create a semaphore");
-    }    
-    if (vkCreateSemaphore(g_device,&semaphore_info,nullptr,&g_render_finished_semaphore) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed create a semaphore!",logger::exc);
-        throw std::runtime_error("failed to create a semaphore");
-    }    
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        if (vkCreateSemaphore(g_device,&semaphore_info,nullptr,&g_image_available_semaphores[i]) != VK_SUCCESS) {
+            logger::log("<Vulkan> Failed create a semaphore!",logger::exc);
+            throw std::runtime_error("failed to create a semaphore");
+        }    
+        if (vkCreateSemaphore(g_device,&semaphore_info,nullptr,&g_render_finished_semaphores[i]) != VK_SUCCESS) {
+            logger::log("<Vulkan> Failed create a semaphore!",logger::exc);
+            throw std::runtime_error("failed to create a semaphore");
+        }    
 
-    if (vkCreateFence(g_device,&fence_info,nullptr,&g_in_flight_fence) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed create a fance!",logger::exc);
-        throw std::runtime_error("failed to create a fence");
-    }    
+        if (vkCreateFence(g_device,&fence_info,nullptr,&g_in_flight_fences[i]) != VK_SUCCESS) {
+            logger::log("<Vulkan> Failed create a fance!",logger::exc);
+            throw std::runtime_error("failed to create a fence");
+        }
+    } 
 }
 
 // moved to core
@@ -1303,5 +1316,20 @@ void konanix::create_sync_objects() {
 // };
 
 void konanix::recreate_swap_chain() {
+    logger::log("Recreating swap chain...",logger::dbg);
+    vkDeviceWaitIdle(g_device);
 
+    for (VkFramebuffer f : g_swapchain_framebuffers)
+        vkDestroyFramebuffer(g_device, f, nullptr);
+
+    for (VkImageView iw : g_swapchain_image_views)
+        vkDestroyImageView(g_device, iw, nullptr);
+    
+    vkDestroySwapchainKHR(g_device, g_swapchain, nullptr);
+
+    create_swap_chain();
+    create_image_views();
+    create_framebuffers();
+
+    logger::log("Swap chain recreated!",logger::dbg);
 }

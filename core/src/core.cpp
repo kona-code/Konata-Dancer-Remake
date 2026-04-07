@@ -449,18 +449,19 @@ int main(int argc, char *argv[]) {
 }
 
 void konanix::draw_frame() {
-    vkWaitForFences(g_device,1,&g_in_flight_fence,VK_TRUE,UINT64_MAX);
-    vkResetFences(g_device,1,&g_in_flight_fence);
+    
+    vkWaitForFences(g_device,1,&g_in_flight_fences[current_frame],VK_TRUE,UINT64_MAX);
+    vkResetFences(g_device,1,&g_in_flight_fences[current_frame]);
 
     uint32_t image_index;
-    vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphore, VK_NULL_HANDLE, &image_index);
+    vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
 
-    vkResetCommandBuffer(g_commandbuffer,0);
-    record_command_buffer(g_commandbuffer, image_index);
+    vkResetCommandBuffer(g_commandbuffers[current_frame],0);
+    record_command_buffer(g_commandbuffers[current_frame], image_index);
     
-    const VkSemaphore wait_semaphores[] = {g_image_available_semaphore};
+    const VkSemaphore wait_semaphores[] = {g_image_available_semaphores[current_frame]};
     const VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    const VkSemaphore signal_semaphores[] = {g_render_finished_semaphore};
+    const VkSemaphore signal_semaphores[] = {g_render_finished_semaphores[current_frame]};
 
     const VkSubmitInfo submit_info {
         VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -471,12 +472,12 @@ void konanix::draw_frame() {
         wait_stages,
 
         1,
-        &g_commandbuffer,
+        &g_commandbuffers[current_frame],
 
         1,
         signal_semaphores
     };
-    if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fence) != VK_SUCCESS) {
+    if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fences[current_frame]) != VK_SUCCESS) {
         logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
         throw std::runtime_error("failed to submit draw command buffer");
     } 
@@ -499,5 +500,5 @@ void konanix::draw_frame() {
         nullptr
     };
     vkQueuePresentKHR(g_presentqueue,&present_info);
-
+    current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 };
