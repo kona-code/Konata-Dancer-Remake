@@ -11,6 +11,11 @@
 #include <vulkan/vulkan_core.h>
 #include <fstream>
 #include <chrono>
+#include <array>
+#include <filesystem>
+#include <vector>
+#include <stdexcept>
+#include <algorithm>
 
 #include <gif_lib.h>
 
@@ -25,15 +30,208 @@
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
 
+struct GifFrame {
+    std::vector<uint8_t> rgba;
+    int delay_ms = 100;
+};
+
 struct GifAnimation {
     int width = 0;
     int height = 0;
-    int frame_count = 0;
-    std::vector<uint8_t> rgba;      // frame_count * width * height * 4
-    std::vector<int> delays_raw;    // stb data per frame
+    std::vector<GifFrame> frames;
 };
 
-VkDevice device = VK_NULL_HANDLE;
+// giflib helpers
+static std::vector<uint8_t> read_binary_file(const std::filesystem::path& p) {
+    std::ifstream file(p, std::ios::binary | std::ios::ate);
+    if (!file) {
+        logger::log("Failed to open \""+p.string()+"\"!",logger::exc);
+        throw std::runtime_error("failed to open file: " + p.string());
+    }
+
+    std::streamsize size = file.tellg();
+    if (size <= 0) {
+        logger::log("File \""+p.string()+"\" is empty!",logger::exc);
+        throw std::runtime_error("empty file: " + p.string());
+    }
+
+    std::vector<uint8_t> data(static_cast<size_t>(size));
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char*>(data.data()), size)) {
+        logger::log("Failed to read file \""+p.string()+"\"!",logger::exc);
+        throw std::runtime_error("failed to read file: " + p.string());
+    }
+    return data;
+}
+
+static std::array<uint8_t, 4> gif_color_at(const ColorMapObject* cmap, int index) {
+    if (!cmap || index < 0 || index >= cmap->ColorCount) return {0, 0, 0, 0};
+    const GifColorType& c = cmap->Colors[index];
+    return {c.Red, c.Green, c.Blue, 255};
+}
+
+static int gif_gce_disposal(const SavedImage& img) {
+    for (int i = 0; i < img.ExtensionBlockCount; ++i) {
+        const ExtensionBlock& eb = img.ExtensionBlocks[i];
+        if (eb.Function == GRAPHICS_EXT_FUNC_CODE && eb.ByteCount >= 4) {
+            return (eb.Bytes[0] >> 2) & 0x7;
+        }
+    }
+    return 0;
+}
+
+static int gif_gce_delay_ms(const SavedImage& img) {
+    for (int i = 0; i < img.ExtensionBlockCount; ++i) {
+        const ExtensionBlock& eb = img.ExtensionBlocks[i];
+        if (eb.Function == GRAPHICS_EXT_FUNC_CODE && eb.ByteCount >= 4) {
+            int hundredths = eb.Bytes[1] | (eb.Bytes[2] << 8);
+            return std::max(10, hundredths * 10);
+        }
+    }
+    return 100;
+}
+
+static int gif_gce_transparent_index(const SavedImage& img) {
+    for (int i = 0; i < img.ExtensionBlockCount; ++i) {
+        const ExtensionBlock& eb = img.ExtensionBlocks[i];
+        if (eb.Function == GRAPHICS_EXT_FUNC_CODE && eb.ByteCount >= 4) {
+            const bool has_transparency = (eb.Bytes[0] & 0x01) != 0;
+            return has_transparency ? static_cast<int>(eb.Bytes[3]) : -1;
+        }
+    }
+    return -1;
+}
+
+static void fill_canvas(std::vector<uint8_t>& canvas, const std::array<uint8_t, 4>& rgba) {
+    for (size_t i = 0; i + 3 < canvas.size(); i += 4) {
+        canvas[i + 0] = rgba[0];
+        canvas[i + 1] = rgba[1];
+        canvas[i + 2] = rgba[2];
+        canvas[i + 3] = rgba[3];
+    }
+}
+
+static void clear_rect_to_bg(std::vector<uint8_t>& canvas,
+                             int canvas_w, int canvas_h,
+                             int left, int top, int w, int h,
+                             const std::array<uint8_t, 4>& bg) {
+    for (int y = 0; y < h; ++y) {
+        const int dy = top + y;
+        if (dy < 0 || dy >= canvas_h) continue;
+        for (int x = 0; x < w; ++x) {
+            const int dx = left + x;
+            if (dx < 0 || dx >= canvas_w) continue;
+            const size_t p = static_cast<size_t>(dy * canvas_w + dx) * 4;
+            canvas[p + 0] = bg[0];
+            canvas[p + 1] = bg[1];
+            canvas[p + 2] = bg[2];
+            canvas[p + 3] = bg[3];
+        }
+    }
+}
+
+static void draw_indexed_frame(std::vector<uint8_t>& canvas,
+                               int canvas_w, int canvas_h,
+                               const SavedImage& img,
+                               const ColorMapObject* cmap,
+                               int transparent_index) {
+    const int left = img.ImageDesc.Left;
+    const int top  = img.ImageDesc.Top;
+    const int w    = img.ImageDesc.Width;
+    const int h    = img.ImageDesc.Height;
+
+    const GifByteType* src = img.RasterBits;
+
+    for (int y = 0; y < h; ++y) {
+        const int dy = top + y;
+        if (dy < 0 || dy >= canvas_h) continue;
+
+        for (int x = 0; x < w; ++x) {
+            const int dx = left + x;
+            if (dx < 0 || dx >= canvas_w) continue;
+
+            const int idx = src[y * w + x];
+            if (idx == transparent_index) continue;
+
+            const auto c = gif_color_at(cmap, idx);
+            const size_t p = static_cast<size_t>(dy * canvas_w + dx) * 4;
+            canvas[p + 0] = c[0];
+            canvas[p + 1] = c[1];
+            canvas[p + 2] = c[2];
+            canvas[p + 3] = 255;
+        }
+    }
+}
+
+// main GIF loader
+static GifAnimation load_gif_animation(const std::filesystem::path& path) {
+    int err = 0;
+    GifFileType* gif = DGifOpenFileName(path.string().c_str(), &err);
+    if (!gif) {
+        logger::log("DGifOpenFileName failed for \""+path.string()+"\"! Exception details: "+std::to_string(err),logger::exc);
+        throw std::runtime_error("DGifOpenFileName failed for: " + path.string() + " err=" + std::to_string(err));
+    }
+
+    if (DGifSlurp(gif) == GIF_ERROR) {
+        int close_err = 0;
+        DGifCloseFile(gif, &close_err);
+        logger::log("DGifSlurp failed for \""+path.string()+"\"!",logger::exc);
+        throw std::runtime_error("DGifSlurp failed for: " + path.string());
+    }
+
+    GifAnimation anim;
+    anim.width = gif->SWidth;
+    anim.height = gif->SHeight;
+    anim.frames.reserve(std::max(0, gif->ImageCount));
+
+    std::vector<uint8_t> canvas(static_cast<size_t>(anim.width) * anim.height * 4, 0);
+
+    std::array<uint8_t, 4> bg = {0, 0, 0, 0};
+    if (gif->SColorMap &&
+        gif->SBackGroundColor >= 0 &&
+        gif->SBackGroundColor < gif->SColorMap->ColorCount) {
+        bg = gif_color_at(gif->SColorMap, gif->SBackGroundColor);
+    }
+    fill_canvas(canvas, bg);
+
+    for (int i = 0; i < gif->ImageCount; ++i) {
+        const SavedImage& img = gif->SavedImages[i];
+        const ColorMapObject* cmap = img.ImageDesc.ColorMap ? img.ImageDesc.ColorMap : gif->SColorMap;
+        if (!cmap) {
+            int close_err = 0;
+            DGifCloseFile(gif, &close_err);
+            logger::log("GIF frame (i="+std::to_string(i)+") has no color map!",logger::exc);
+            throw std::runtime_error("GIF frame has no color map");
+        }
+
+        const int disposal = gif_gce_disposal(img);
+        const int delay_ms = gif_gce_delay_ms(img);
+        const int transparent_index = gif_gce_transparent_index(img);
+
+        std::vector<uint8_t> before = canvas; // for disposal 3
+        draw_indexed_frame(canvas, anim.width, anim.height, img, cmap, transparent_index);
+
+        GifFrame frame;
+        frame.delay_ms = delay_ms;
+        frame.rgba = canvas;
+        anim.frames.push_back(std::move(frame));
+
+        if (disposal == 2) {
+            clear_rect_to_bg(canvas,
+                             anim.width, anim.height,
+                             img.ImageDesc.Left, img.ImageDesc.Top,
+                             img.ImageDesc.Width, img.ImageDesc.Height,
+                             bg);
+        } else if (disposal == 3) {
+            canvas.swap(before);
+        }
+    }
+
+    int close_err = 0;
+    DGifCloseFile(gif, &close_err);
+    return anim;
+}
+
 VkImage g_gif_image = VK_NULL_HANDLE;
 VkDeviceMemory g_gif_image_memory = VK_NULL_HANDLE;
 VkImageView g_gif_image_view = VK_NULL_HANDLE;
@@ -48,6 +246,7 @@ static uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags pro
             return i;
         }
     }
+    logger::log("Failed to find a suitable memory type!",logger::exc);
     throw std::runtime_error("failed to find a suitable memory type");
 }
 
@@ -84,12 +283,20 @@ void konanix::create_image(uint32_t width, uint32_t height, VkFormat format, VkI
         VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         VK_NULL_HANDLE,
         mem_requirements.size,
-        find_memory_type(mem_requirements.memoryTypeBits, properties)
+        ::find_memory_type(mem_requirements.memoryTypeBits, properties, g_physicaldevice)
     };
 
     if (vkAllocateMemory(g_device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
         vkDestroyImage(g_device,image,nullptr);
         image = VK_NULL_HANDLE;
+        logger::log("Failed to allocate image memory!",logger::exc);
+        throw std::runtime_error("failed to allocate image memory");
+    }
+    if (vkBindImageMemory(g_device, image, image_memory, 0) != VK_SUCCESS) {
+        vkFreeMemory(g_device, image_memory, nullptr);
+        vkDestroyImage(g_device, image, nullptr);
+        image = VK_NULL_HANDLE;
+        image_memory = VK_NULL_HANDLE;
         logger::log("Failed to bind image memory!",logger::exc);
         throw std::runtime_error("failed to bind image memory");
     }
@@ -161,61 +368,61 @@ static VkSampler create_sampler(VkPhysicalDevice p_device, VkDevice device) {
     return sampler;
 }
 
+void konanix::create_descriptor_pool() {
+    std::array<VkDescriptorPoolSize, 1> pool_sizes{{
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 }
+    }};
+
+    VkDescriptorPoolCreateInfo pool_info{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        nullptr,
+        0,
+        4,                                  // maxSets
+        static_cast<uint32_t>(pool_sizes.size()),
+        pool_sizes.data()
+    };
+
+    if (vkCreateDescriptorPool(g_device, &pool_info, nullptr, &g_descriptor_pool) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create descriptor pool");
+    }
+}
+
 void konanix::create_descriptor_set() {
-    VkDescriptorSetLayout layouts[] = {g_descriptor_set_layout};
+    VkDescriptorSetLayout layouts[] = { g_descriptor_set_layout };
 
-    const VkDescriptorSetAllocateInfo alloc_info {
+    VkDescriptorSetAllocateInfo alloc_info{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        VK_NULL_HANDLE,
-
+        nullptr,
         g_descriptor_pool,
         1,
         layouts
     };
-    if (vkAllocateDescriptorSets(g_device,&alloc_info,&g_descriptor_set) != VK_SUCCESS) {
-        throw std::runtime_error("failed to allocate descriptor set");
+
+    VkResult res = vkAllocateDescriptorSets(g_device, &alloc_info, &g_descriptor_set);
+    if (res != VK_SUCCESS) {
+        throw std::runtime_error("vkAllocateDescriptorSets failed with code " + std::to_string((int)res));
     }
 
-    const VkDescriptorImageInfo image_info {
+    VkDescriptorImageInfo image_info{
         g_gif_sampler,
         g_gif_image_view,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
 
-    const VkWriteDescriptorSet write {
+    VkWriteDescriptorSet write{
         VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        VK_NULL_HANDLE,
-
+        nullptr,
         g_descriptor_set,
         0,
         0,
         1,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         &image_info,
-        VK_NULL_HANDLE,
-        VK_NULL_HANDLE
-    };
-}
-
-void konanix::create_descriptor_pool() {
-    constexpr VkDescriptorPoolSize pool_size {
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        1
+        nullptr,
+        nullptr
     };
 
-    const VkDescriptorPoolCreateInfo pool_info {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-
-        1,
-        1,
-        &pool_size
-    };
-
-    if (vkCreateDescriptorPool(g_device,&pool_info,nullptr,&g_descriptor_pool) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create descriptor pool");
-    }
+    vkUpdateDescriptorSets(g_device, 1, &write, 0, nullptr);
 }
 
 void konanix::create_descriptor_set_layout() {
@@ -278,360 +485,6 @@ static std::vector<uint8_t> read_binary_file(const std::string& path) {
     return data;
 }
 
-static GifAnimation load_gif_animation(const std::string& path) {
-    GifAnimation gif{};
-    logger::log("Storing GIF to memory...",logger::dbg);
-    const std::vector<uint8_t> file_bytes = read_binary_file(path);
-    int* delays = nullptr;
-    int comp = 0;
-    int frames = 0;
-
-    logger::log("Loading GIF from memory (STB)...",logger::dbg);
-    stbi_uc* pixels;
-    //  = stbi_load_gif_from_memory( // borked
-    //     file_bytes.data(),
-    //     static_cast<int>(file_bytes.size()),
-    //     &delays,
-    //     &gif.width,
-    //     &gif.height,
-    //     &frames,
-    //     &comp,
-    //     4
-    // );
-   stbi__context s; 
-   stbi__start_mem(&s,file_bytes.data(),static_cast<int>(file_bytes.size())); 
-    logger::log("Pixels loaded to memory!",logger::dbg);
-   
-//    pixels = (unsigned char*) stbi__load_gif_main(&s, &delays, &gif.height, &gif.width, &frames, &comp, 4);
-   if (stbi__gif_test(&s)) {
-      int layers = 0;
-      stbi_uc *u = 0;
-      stbi_uc *out = 0;
-      stbi_uc *two_back = 0;
-      stbi__gif g;
-      int stride;
-      int out_size = 0;
-      int delays_size = 0;
-
-      STBI_NOTUSED(out_size);
-      STBI_NOTUSED(delays_size);
-
-      memset(&g, 0, sizeof(g));
-      if (delays) {
-         *delays = 0;
-      }
-
-      do {
-        //  logger::log("Calling stbi__gif_load_next()...",logger::dbg);
-        //  u = stbi__gif_load_next(&s, &g, &comp, /*req_comp*/4, two_back); //borked
-        {
-               int dispose;
-               int first_frame;
-               int pi;
-               int pcount;
-               STBI_NOTUSED(4);
-
-               // on first frame, any non-written pixels get the background colour (non-transparent)
-               first_frame = 0;
-               if (g.out == 0) {
-                    logger::log("STB loading fisrt frame...!",logger::dbg);
-                  if (!stbi__gif_header(&s, &g, &comp,0)) u = 0; // stbi__g_failure_reason set by stbi__gif_header
-                  if (!stbi__mad3sizes_valid(4, g.w, g.h, 0)) {
-                    logger::log("STB error: \"GIF image is too large\"!",logger::err);
-                    u = stbi__errpuc("too large", "GIF image is too large");
-                  }
-                  pcount = g.w * g.h;
-                  g.out = (stbi_uc *) stbi__malloc(4 * pcount);
-                  g.background = (stbi_uc *) stbi__malloc(4 * pcount);
-                  g.history = (stbi_uc *) stbi__malloc(pcount);
-                  if (!g.out || !g.background || !g.history) {
-                    logger::log("STB error: \"Out of memory\"!",logger::err);
-                    u = stbi__errpuc("outofmem", "Out of memory");
-                  }
-            
-                  // image is treated as "transparent" at the start - ie, nothing overwrites the current background;
-                  // background colour is only used for pixels that are not rendered first frame, after that "background"
-                  // color refers to the color that was there the previous frame.
-                  memset(g.out, 0x00, 4 * pcount);
-                  memset(g.background, 0x00, 4 * pcount); // state of the background (starts transparent)
-                  memset(g.history, 0x00, pcount);        // pixels that were affected previous frame
-                  first_frame = 1;
-                  logger::log("STB first frame loaded!",logger::dbg);
-               } else {
-                  logger::log("STB Loading second frame...",logger::dbg);
-                  // second frame - how do we dispose of the previous one?
-                  dispose = (g.eflags & 0x1C) >> 2;
-                  pcount = g.w * g.h;
-            
-                  if ((dispose == 3) && (two_back == 0)) {
-                     dispose = 2; // if I don't have an image to revert back to, default to the old background
-                  }
-              
-                  if (dispose == 3) { // use previous graphic
-                     logger::log("STB using previous graphic (dispose == 3).",logger::dbg);
-                     for (pi = 0; pi < pcount; ++pi) {
-                        if (g.history[pi]) {
-                           memcpy( &g.out[pi * 4], &two_back[pi * 4], 4 );
-                        }
-                     }
-                  } else if (dispose == 2) {
-                     // restore what was changed last frame to background before that frame;
-                     for (pi = 0; pi < pcount; ++pi) {
-                        if (g.history[pi]) {
-                           memcpy( &g.out[pi * 4], &g.background[pi * 4], 4 );
-                        }
-                     }
-                  } else {
-                     // This is a non-disposal case eithe way, so just
-                     // leave the pixels as is, and they will become the new background
-                     // 1: do not dispose
-                     // 0:  not specified.
-                  }
-              
-                  // background is what out is after the undoing of the previou frame;
-                  memcpy( g.background, g.out, 4 * g.w * g.h );
-                  logger::log("STB second frame loaded!",logger::dbg);
-
-               }
-           
-               // clear my history;
-               memset( g.history, 0x00, g.w * g.h );        // pixels that were affected previous frame
-               logger::log("STB history cleared!",logger::dbg);
-           
-               for (;;) {
-                  int tag = stbi__get8(&s);
-                  switch (tag) {
-                     case 0x2C: /* Image Descriptor */
-                     {
-                        logger::log("STB hit case \"0x2C\" (Image Descriptor).",logger::dbg);
-                        stbi__int32 x, y, w, h;
-                        stbi_uc *o;
-                    
-                        x = stbi__get16le(&s);
-                        y = stbi__get16le(&s);
-                        w = stbi__get16le(&s);
-                        h = stbi__get16le(&s);
-                        if (((x + w) > (g.w)) || ((y + h) > (g.h))) {
-                            logger::log("STB error: \"Corrupt GIF\"!",logger::err);
-                            u = stbi__errpuc("bad Image Descriptor", "Corrupt GIF");
-                        }
-                        g.line_size = g.w * 4;
-                        g.start_x = x * 4;
-                        g.start_y = y * g.line_size;
-                        g.max_x   = g.start_x + w * 4;
-                        g.max_y   = g.start_y + h * g.line_size;
-                        g.cur_x   = g.start_x;
-                        g.cur_y   = g.start_y;
-                    
-                        // if the width of the specified rectangle is 0, that means
-                        // we may not see *any* pixels or the image is malformed;
-                        // to make sure this is caught, move the current y down to
-                        // max_y (which is what out_gif_code checks).
-                        if (w == 0)
-                           g.cur_y = g.max_y;
-                    
-                        g.lflags = stbi__get8(&s);
-                    
-                        if (g.lflags & 0x40) {
-                           g.step = 8 * g.line_size; // first interlaced spacing
-                           g.parse = 3;
-                        } else {
-                           g.step = g.line_size;
-                           g.parse = 0;
-                        }
-                    
-                        if (g.lflags & 0x80) {
-                           stbi__gif_parse_colortable(&s,g.lpal, 2 << (g.lflags & 7), g.eflags & 0x01 ? g.transparent : -1);
-                           g.color_table = (stbi_uc *) g.lpal;
-                        } else if (g.flags & 0x80) {
-                           g.color_table = (stbi_uc *) g.pal;
-                        } else {
-                            logger::log("STB error: \"Corrupt GIF\"!",logger::err);
-                            u = stbi__errpuc("missing color table", "Corrupt GIF");
-                        }
-                        o = stbi__process_gif_raster(&s, &g);
-                        if (!o) u = NULL;
-                    
-                        // if this was the first frame,
-                        pcount = g.w * g.h;
-                        if (first_frame && (g.bgindex > 0)) {
-                           // if first frame, any pixel not drawn to gets the background color
-                           for (pi = 0; pi < pcount; ++pi) {
-                              if (g.history[pi] == 0) {
-                                 g.pal[g.bgindex][3] = 255; // just in case it was made transparent, undo that; It will be reset next frame if need be;
-                                 memcpy( &g.out[pi * 4], &g.pal[g.bgindex], 4 );
-                              }
-                           }
-                        }
-                    
-                        u = o;
-                     }
-                 
-                     case 0x21: // Comment Extension.
-                     {
-                        logger::log("STB hit case \"0x21\" (Comment Extension).",logger::dbg);
-                        int len;
-                        int ext = stbi__get8(&s);
-                        if (ext == 0xF9) { // Graphic Control Extension.
-                           len = stbi__get8(&s);
-                           if (len == 4) {
-                              g.eflags = stbi__get8(&s);
-                              g.delay = 10 * stbi__get16le(&s); // delay - 1/100th of a second, saving as 1/1000ths.
-                        
-                              // unset old transparent
-                              if (g.transparent >= 0) {
-                                 g.pal[g.transparent][3] = 255;
-                              }
-                              if (g.eflags & 0x01) {
-                                 g.transparent = stbi__get8(&s);
-                                 if (g.transparent >= 0) {
-                                    g.pal[g.transparent][3] = 0;
-                                 }
-                              } else {
-                                 // don't need transparent
-                                 stbi__skip(&s, 1);
-                                 g.transparent = -1;
-                              }
-                           } else {
-                              stbi__skip(&s, len);
-                              break;
-                           }
-                        }
-                        while ((len = stbi__get8(&s)) != 0) {
-                           stbi__skip(&s, len);
-                        }
-                        break;
-                     }
-                 
-                     case 0x3B: // gif stream termination code
-                        logger::log("STB hit case \"0x3B\" (GIF stream termination code).",logger::err);
-                        // u = (stbi_uc *) s; // using '1' causes warning on some compilers
-                        u = NULL;
-                     default:
-                        logger::log("STB hit default case! Throwing.",logger::dbg);
-                        // u = stbi__errpuc("unknown code", "Corrupt GIF");
-                        // throw std::runtime_error("corrupt gif");
-                        break;
-                  }
-               }
-        }
-        //  logger::log("Call suceeded",logger::dbg);
-         if (u == (stbi_uc *) &s) u = 0;  // end of animated gif marker
-
-         if (u) {
-            logger::log("STB loading image...",logger::dbg);
-            gif.height = std::move(g.w);
-            gif.width = std::move(g.h);
-            ++layers;
-            stride = g.w * g.h * 4;
-
-            if (out) {
-               void *tmp = (stbi_uc*) STBI_REALLOC_SIZED( out, out_size, layers * stride );
-               if (!tmp) {
-                pixels = (unsigned char*) stbi__load_gif_main_outofmem(&g, out, &delays);
-                logger::log("STB out of memory!.",logger::dbg);
-                break; 
-               }
-               else {
-                   out = (stbi_uc*) tmp;
-                   out_size = layers * stride;
-               }
-
-               if (delays) {
-                  int *new_delays = (int*) STBI_REALLOC_SIZED(delays, delays_size, sizeof(int) * layers );
-                  if (!new_delays) {
-                     pixels = (unsigned char*) stbi__load_gif_main_outofmem(&g, out, &delays);
-                     logger::log("STB out of memory!.",logger::dbg);
-                     break;
-                  }
-                  *delays = *new_delays;
-                  delays_size = layers * sizeof(int);
-               }
-            } else {
-               out = (stbi_uc*)stbi__malloc( layers * stride );
-               if (!out) {
-                  pixels = (unsigned char*) stbi__load_gif_main_outofmem(&g, out, &delays);
-                  logger::log("STB out of memory!.",logger::dbg);
-                  break;
-               }
-               out_size = layers * stride;
-               if (delays) {
-                  *delays = *   (int*) stbi__malloc(layers * sizeof(int));
-                  if (!*delays) {
-                     pixels = (unsigned char*) stbi__load_gif_main_outofmem(&g, out, &delays);
-                    logger::log("STB out of memory!.",logger::dbg);
-                     break;
-                  }
-                  delays_size = layers * sizeof(int);
-               }
-            }
-            memcpy( out + ((layers - 1) * stride), u, stride );
-            if (layers >= 2) {
-               two_back = out - 2 * stride;
-            }
-
-            if (delays) {
-               (*delays)[&layers - 1U] = g.delay;
-            }
-            logger::log("STB image loaded.",logger::dbg);
-         }
-      } while (u != 0);
-
-      // free temp buffer;
-      STBI_FREE(g.out);
-      STBI_FREE(g.history);
-      STBI_FREE(g.background);
-
-      // do the final conversion after loading everything;
-    //   if (req_comp && req_comp != 4)
-      pixels = stbi__convert_format(out, 4, 4, layers * g.w, g.h);
-
-      gif.frame_count = layers;
-//    } else {
-//       return stbi__errpuc("not GIF", "Image was not as a gif type.");
-//    }
-    }
-   logger::log("GIF data loaded form memory!",logger::dbg);
-   
-   if (stbi__vertically_flip_on_load) {
-      stbi__vertical_flip_slices(pixels,gif.width,gif.height,frames,comp); 
-   }
-
-
-    if (!pixels) {
-        logger::log("STB failed to load GIF data: "+
-            std::string((stbi_failure_reason() ? stbi_failure_reason() : "unknown")),logger::dbg);
-        throw std::runtime_error(std::string("stbi_load_gif_from_memory failed: ") +
-                                 (stbi_failure_reason() ? stbi_failure_reason() : "unknown"));
-    }
-
-    if (frames <= 0) {
-        stbi_image_free(pixels);
-        stbi_image_free(delays);
-        throw std::runtime_error("GIF has no frames");
-    }
-
-    gif.frame_count = static_cast<uint32_t>(frames);
-    const size_t frame_bytes = static_cast<size_t>(gif.width) * gif.height * 4;
-    gif.rgba.assign(pixels, pixels + frame_bytes * gif.frame_count);
-
-    gif.delays_raw.resize(gif.frame_count);
-    for (uint32_t i = 0; i < gif.frame_count; ++i) {
-        gif.delays_raw[i] = delays ? delays[i] : 100;
-        if (gif.delays_raw[i] <= 0) gif.delays_raw[i] = 100;
-    }
-
-    stbi_image_free(pixels);
-    stbi_image_free(delays);
-    return gif;
-}
-
-static inline const uint8_t* gif_frame_ptr(const GifAnimation& gif, uint32_t frame_index) {
-    const size_t frame_bytes = static_cast<size_t>(gif.width) * gif.height * 4;
-    return gif.rgba.data() + frame_bytes * frame_index;
-}
-
-// Vulkan helpers
 VkCommandBuffer konanix::begin_single_time_commands() {
     VkCommandBufferAllocateInfo alloc_info{
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -679,7 +532,7 @@ void konanix::end_single_time_commands(VkCommandBuffer cmd) {
     };
 
     if (vkQueueSubmit(g_graphicsqueue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS) {
-        vkFreeCommandBuffers(device, g_commandpool, 1, &cmd);
+        vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
         logger::log("Failed to submit transient command buffer!",logger::exc);
         throw std::runtime_error("failed to submit transient command buffer");
     }
@@ -818,8 +671,8 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
 
-    vkDestroyBuffer(device, staging_buffer, nullptr);
-    vkFreeMemory(device, staging_memory, nullptr);
+    vkDestroyBuffer(g_device, staging_buffer, nullptr);
+    vkFreeMemory(g_device, staging_memory, nullptr);
     logger::log("Freed up unneeded memory!",logger::dbg);
 }
 
@@ -969,100 +822,56 @@ int main(int argc, char *argv[]) {
         logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
         exit(1);
     }
-    device = w.get_device();
 
-    // VkBuffer staging_buffer;
-    // VkDeviceMemory staging_buffer_memory;
-    // const VkBufferCreateInfo buffer_info {
-    //     VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-    //     VK_NULL_HANDLE,
-    //     // VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-    //     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-    //     w.image_size,
-    //     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-    //     VK_SHARING_MODE_EXCLUSIVE,
-    //     0,
-    //     nullptr
-    // };
-
-    // w.create_buffer(w.image_size,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,staging_buffer,staging_buffer_memory);
-
-    // logger::log("Mapping memory...",logger::dbg);
-    // vkMapMemory(w.get_device(),staging_buffer_memory,0,w.image_size,0,&w.pxdata);
-    // memcpy(w.pxdata,pxs,static_cast<size_t>(w.image_size));
-    // vkUnmapMemory(w.get_device(),staging_buffer_memory);
-    // logger::log("GIF pixel data stored!",logger::dbg);
-    // w.create_gif_image(iw,ih);
-    // stbi_image_free(pxs);
-    // TODO:
-    // update fragment shader (sample gif image)
-    // per-frame upload to texture
-    // bind descriptor
     logger::log("Loading animated GIF...", logger::dbg);
-    GifAnimation gif = load_gif_animation(path);
-    logger::log("Loaded! Creating GIF image...", logger::dbg);
-    
-    w.image_size = gif.width * gif.height * 4;
-    w.create_gif_image(gif.width, gif.height);
-    logger::log("GIF image created!", logger::dbg);
-    
-    // upload first frame
-    w.upload_rgba_frame_to_gif_image(
-        gif_frame_ptr(gif, 0),
-        static_cast<size_t>(gif.width) * gif.height * 4,
-        gif.width,
-        gif.height,
-        true
-    );
-    logger::log("Frame uploaded successfully!", logger::dbg);
-    
-    stbi_image_free(nullptr);
-    
+
+    GifAnimation anim = load_gif_animation(path);
+    w.create_gif_image(anim.width, anim.height);
+    w.create_descriptor_set();
+
+    size_t frame_index = 0;
     auto next_frame_time = std::chrono::steady_clock::now() +
-        std::chrono::milliseconds(std::max(1, gif.delays_raw[0]));
-    
-    uint32_t frame_index = 0;
-    logger::log("GIF loaded!", logger::dbg);
-
-
+        std::chrono::milliseconds(std::max(1, anim.frames[0].delay_ms));
+    logger::log("Initialized!");
+    logger::log("Started rendering loop!",logger::dbg);
     while (!glfwWindowShouldClose(w.g_window)) {
-            glfwPollEvents();
+        glfwPollEvents();
 
-            const auto now = std::chrono::steady_clock::now();
-            if (now >= next_frame_time && gif.frame_count > 0) {
-                frame_index = (frame_index + 1) % gif.frame_count;
-            
-                w.upload_rgba_frame_to_gif_image(
-                    gif_frame_ptr(gif, frame_index),
-                    static_cast<size_t>(gif.width) * gif.height * 4,
-                    gif.width,
-                    gif.height,
-                    false
-                );
-            
-                next_frame_time = now + std::chrono::milliseconds(std::max(1, gif.delays_raw[frame_index]));
-            }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_frame_time) {
+            const GifFrame& f = anim.frames[frame_index];
+            w.upload_rgba_frame_to_gif_image(
+                f.rgba.data(),
+                f.rgba.size(),
+                anim.width,
+                anim.height,
+                frame_index == 0
+            );
+
+            frame_index = (frame_index + 1) % anim.frames.size();
+            next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
+        }
+
         w.draw_frame();
-        
     }
 
     if (g_gif_sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, g_gif_sampler, nullptr);
+        vkDestroySampler(w.get_device(), g_gif_sampler, nullptr);
         g_gif_sampler = VK_NULL_HANDLE;
     }
 
     if (g_gif_image_view != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, g_gif_image_view, nullptr);
+        vkDestroyImageView(w.get_device(), g_gif_image_view, nullptr);
         g_gif_image_view = VK_NULL_HANDLE;
     }
 
     if (g_gif_image != VK_NULL_HANDLE) {
-        vkDestroyImage(device, g_gif_image, nullptr);
+        vkDestroyImage(w.get_device(), g_gif_image, nullptr);
         g_gif_image = VK_NULL_HANDLE;
     }
 
     if (g_gif_image_memory != VK_NULL_HANDLE) {
-        vkFreeMemory(device, g_gif_image_memory, nullptr);
+        vkFreeMemory(w.get_device(), g_gif_image_memory, nullptr);
         g_gif_image_memory = VK_NULL_HANDLE;
     }
     return 0;

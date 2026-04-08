@@ -23,6 +23,7 @@ public:
     void render();
     void cleanup();
     void draw_frame();
+    void create_descriptor_set();
     std::atomic<bool> running {true};
     konanix(const uint32_t &width = 1280, const uint32_t &height = 640);
     ~konanix();
@@ -53,7 +54,6 @@ private:
     void recreate_swap_chain();
 
     void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
-    void create_descriptor_set();
     void create_descriptor_pool();
     void create_descriptor_set_layout();
 

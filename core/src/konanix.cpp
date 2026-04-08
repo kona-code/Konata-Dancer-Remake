@@ -233,6 +233,18 @@ static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurface
     for (const auto& availableFormat : availableFormats) {
         if (availableFormat.format==VK_FORMAT_B8G8R8_SRGB&&availableFormat.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return availableFormat;
     }
+    // for (const auto& f : availableFormats) {
+    //     if (f.format == VK_FORMAT_B8G8R8A8_SRGB &&
+    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+    //         return f;
+    //     }
+    // }
+    // for (const auto& f : availableFormats) {
+    //     if (f.format == VK_FORMAT_B8G8R8A8_UNORM &&
+    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+    //         return f;
+    //     }
+    // }
     return availableFormats[0]; // TODO: make a ranking system for the next best format
 }
 
@@ -428,8 +440,9 @@ konanix::konanix(const uint32_t &w, const uint32_t &h)
     // logger::log("<Vulkan> Window will be created with size params: "+std::to_string(width)+"x"+std::to_string(height),logger::dbg);
 
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
+    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-    // glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     g_window = glfwCreateWindow(width,height, "Konata Dancer", nullptr,nullptr);
     if (!g_window) {
@@ -752,7 +765,14 @@ void konanix::create_swap_chain() {
         logger::log("<Vulkan> Swap chain will be using \"VK_SHARING_MODE_EXCLUSIVE\".",logger::dbg);
     }
     createInfo.preTransform = swap_chain_support.capabilities.currentTransform;
-    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // no transformation needed - change if future transparency is needed 
+    createInfo.compositeAlpha =
+    (swap_chain_support.capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
+        ? VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR
+        : (swap_chain_support.capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)
+            ? VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR
+            : (swap_chain_support.capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR)
+                ? VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR
+                : VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 
     createInfo.presentMode = present_mode;
     createInfo.clipped = VK_TRUE; // enable if full rendering is required in the future https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Swap_chain
@@ -1164,66 +1184,60 @@ void konanix::create_commandbuffers() {
 }
 
 void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index) {
-
-    constexpr VkCommandBufferBeginInfo begin_info {
+    VkCommandBufferBeginInfo begin_info{
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        VK_NULL_HANDLE,
-        // VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,         The command buffer will be rerecorded right after executing it once.
-        // VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT,    This is a secondary command buffer that will be entirely within a single render pass.
-        // VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,        The command buffer can be resubmitted while it is also already pending execution.        
+        nullptr,
         0,
         nullptr
     };
-    if (vkBeginCommandBuffer(commandbuffer,&begin_info) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed to begin recording the command buffer!",logger::exc);
+
+    if (vkBeginCommandBuffer(commandbuffer, &begin_info) != VK_SUCCESS) {
         throw std::runtime_error("failed to begin recording command buffer");
     }
-    // logger::log("<Vulkan> Began command buffer!",logger::dbg);
 
-    const VkClearValue clear_color = {{{0.0f,0.0f,0.0f,1.0f}}};
+    VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 0.0f}}};
 
-    const VkRenderPassBeginInfo renderpass_info {
+    VkRenderPassBeginInfo renderpass_info{
         VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        VK_NULL_HANDLE,
-
+        nullptr,
         g_renderpass,
         g_swapchain_framebuffers[image_index],
-        {
-            {0, 0},
-            g_swapchain_extent
-        },
+        {{0, 0}, g_swapchain_extent},
         1,
         &clear_color
     };
-    vkCmdBeginRenderPass(commandbuffer,&renderpass_info,VK_SUBPASS_CONTENTS_INLINE);
-    // logger::log("<Vulkan> Began render pass!",logger::dbg);
 
-    vkCmdBindPipeline(commandbuffer,VK_PIPELINE_BIND_POINT_GRAPHICS,g_graphics_pipeline);
-    // logger::log("<Vulkan> Pipeline bound!",logger::dbg);
+    vkCmdBeginRenderPass(commandbuffer, &renderpass_info, VK_SUBPASS_CONTENTS_INLINE);
 
-    const VkViewport viewport {
-        0.0f,
-        0.0f,
+    vkCmdBindPipeline(commandbuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, g_graphics_pipeline);
+
+    VkViewport viewport{
+        0.0f, 0.0f,
         static_cast<float>(g_swapchain_extent.width),
         static_cast<float>(g_swapchain_extent.height),
-        0.0f,
-        1.0f
+        0.0f, 1.0f
     };
-    vkCmdSetViewport(commandbuffer,0,1,&viewport);
-    // logger::log("<Vulkan> Viewport set!",logger::dbg);
+    vkCmdSetViewport(commandbuffer, 0, 1, &viewport);
 
-    const VkRect2D scissor {
-        {0,0},
-        g_swapchain_extent
-    };
-    vkCmdSetScissor(commandbuffer,0,1,&scissor);
-    // logger::log("<Vulkan> Scissor set!",logger::dbg);
+    VkRect2D scissor{{0, 0}, g_swapchain_extent};
+    vkCmdSetScissor(commandbuffer, 0, 1, &scissor);
 
-    vkCmdDraw(commandbuffer,3,1,0,0);
+    vkCmdBindDescriptorSets(
+        commandbuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        g_pipeline_layout,
+        0,
+        1,
+        &g_descriptor_set,
+        0,
+        nullptr
+    );
+
+    vkCmdDraw(commandbuffer, 3, 1, 0, 0);
+
     vkCmdEndRenderPass(commandbuffer);
 
     if (vkEndCommandBuffer(commandbuffer) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed record command buffer!",logger::exc);
         throw std::runtime_error("failed to record command buffer");
     }
 }
