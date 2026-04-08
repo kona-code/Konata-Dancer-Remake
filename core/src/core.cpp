@@ -41,6 +41,8 @@ struct GifAnimation {
     std::vector<GifFrame> frames;
 };
 
+std::filesystem::path path;
+
 // giflib helpers
 static std::vector<uint8_t> read_binary_file(const std::filesystem::path& p) {
     std::ifstream file(p, std::ios::binary | std::ios::ate);
@@ -357,6 +359,7 @@ VkSampler konanix::create_sampler() {
         VK_COMPARE_OP_ALWAYS,
         0.0f,
         0.0f,
+        // VK_BORDER_COLOR_INT_TRANSPARENT_BLACK,
         VK_BORDER_COLOR_INT_OPAQUE_BLACK,
         VK_FALSE
     };
@@ -377,7 +380,7 @@ void konanix::create_descriptor_pool() {
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         nullptr,
         0,
-        4,                                  // maxSets
+        4,
         static_cast<uint32_t>(pool_sizes.size()),
         pool_sizes.data()
     };
@@ -633,7 +636,7 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
         staging_buffer,
         staging_memory
     );
-    logger::log("Created buffer for GIF frame",logger::dbg);
+    // logger::log("Created buffer for GIF frame",logger::dbg);
 
     void* mapped = nullptr;
     if (vkMapMemory(g_device, staging_memory, 0, pixel_bytes, 0, &mapped) != VK_SUCCESS) {
@@ -645,7 +648,7 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
 
     memcpy(mapped, rgba_pixels, pixel_bytes);
     vkUnmapMemory(g_device, staging_memory);
-    logger::log("Moved GIF pixel data to \"pixel_bytes\"!",logger::dbg);
+    // logger::log("Moved GIF pixel data to \"pixel_bytes\"!",logger::dbg);
 
     const VkImageLayout from_layout = first_upload
         ? VK_IMAGE_LAYOUT_UNDEFINED
@@ -663,7 +666,7 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
         width,
         height
     );
-    logger::log("Successfully copied buffer to image!",logger::dbg);
+    // logger::log("Successfully copied buffer to image!",logger::dbg);
 
     transition_image_layout(
         g_gif_image,
@@ -673,7 +676,7 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
 
     vkDestroyBuffer(g_device, staging_buffer, nullptr);
     vkFreeMemory(g_device, staging_memory, nullptr);
-    logger::log("Freed up unneeded memory!",logger::dbg);
+    // logger::log("Freed up unneeded memory!",logger::dbg);
 }
 
 int main(int argc, char *argv[]) {
@@ -723,10 +726,9 @@ int main(int argc, char *argv[]) {
             "[0m[38;2;128;97;80m:[0m[38;2;128;98;82m:[0m[38;2;127;96;81m:[0m[38;2;125;93;78m:[0m[38;2;116;84;69m;[0m[38;2;110;79;64m,[0m[38;2;109;77;62m,[0m[38;2;105;75;62m,[0m[38;2;103;75;61m,[0m[38;2;104;75;62m,[0m[38;2;106;77;63m,[0m[38;2;105;76;64m,[0m[38;2;104;76;64m,[0m[38;2;95;69;58m,[0m[38;2;83;60;51m'[0m[38;2;88;64;54m'[0m[38;2;88;64;54m'[0m[38;2;88;64;54m'[0m[38;2;85;62;53m'[0m[38;2;65;90;130m;[0m[38;2;74;61;62m'[0m[38;2;87;64;56m'[0m[38;2;70;51;45m.[0m[38;2;74;54;48m.[0m[38;2;102;75;66m,[0m[38;2;102;75;66m,[0m[38;2;100;79;77m,[0m[38;2;89;95;120m;[0m[38;2;76;95;133m;[0m[38;2;83;141;225mo[0m[38;2;80;145;239mo[0m[38;2;71;123;201mc[0m[38;2;93;110;143m:[0m[38;2;173;172;180mk[0m[38;2;182;181;190mO[0m[38;2;207;221;244mX[0m[38;2;206;173;165mO[0m[38;2;253;197;170mK[0m[38;2;252;196;169mK[0m[38;2;251;195;167mK[0m[38;2;251;195;167mK[0m[38;2;251;199;173mK[0m[38;2;208;163;141mk[0m[38;2;63;57;57m.[0m[38;2;71;59;55m.[0m[38;2;182;124;103mo[0m[38;2;175;122;108mo[0m[38;2;96;107;143m:[0m[38;2;69;115;181m:[0m[38;2;73;113;172m:[0m[38;2;196;164;158mk[0m[38;2;253;197;170mK[0m[38;2;253;197;170mK[0m[38;2;252;196;169mK[0m[38;2;250;194;167mK[0m[38;2;248;192;164mK[0m[38;2;243;186;157m0[0m[38;2;236;178;149m0[0m[38;2;230;170;141mO[0m[38;2;169;126;106mo[0m[38;2;150;106;89mc[0m[38;2;187;128;104mo[0m[38;2;152;115;106ml[0m[38;2;177;175;185mk[0m[38;2;164;162;172mx[0m[38;2;111;125;163ml[0m[38;2;63;90;143m;[0m[38;2;66;110;175m:[0m[38;2;64;106;170m:[0m[38;2;73;83;121m,[0m[38;2;95;107;141m:[0m[38;2;75;96;140m;[0m[38;2;62;92;146m;[0m[38;2;74;96;140m;[0m[38;2;112;116;141mc[0m[38;2;147;141;158mo[0m[38;2;160;152;171mx[0m[38;2;160;152;171mx[0m[38;2;161;152;171mx[0m[38;2;31;29;32m [0m[38;2;22;22;22m [0m[38;2;1;1;1m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m\n"
             "\n\033[34m\033[1mCopyright (C) konacode | \033[0m\033[34mhttps://konacode.com/\033[0m\n");
 
-    static std::string path = "";
 
     if (argc>0) {
-        bool log_to_file, debug;
+        bool log_to_file = false, debug = false;
         for (int i = 1; i < argc; i++) {
             const static std::string arg = argv[i];
             if (arg == "-debug" || arg == "--debug" || arg == "-d") debug = true;
@@ -784,42 +786,25 @@ int main(int argc, char *argv[]) {
     
     logger::log("Initializing...");
     if (!path.empty()) {
-        logger::log("Konata Dancer will be loading \""+path+"\".");
+        logger::log("Konata Dancer will be loading \""+path.string()+"\".");
     } else { path = "./konata.gif"; }
-
-    // GifFileType* sprite;
-    // {
-    //     int err = 0;
-    //     sprite = DGifOpenFileName(path.c_str(),&err);
-    //     if (err != 0) {
-    //         logger::log("DGifOpenFileName failed! Code: "+std::to_string(err),logger::exc);
-    //         exit(err);
-    //     }
-    
-    // }
-
-    // logger::log("Fetched GIF data:",logger::dbg);
-    // logger::log("Size: "+std::to_string(sprite->SWidth)+" x "+std::to_string(sprite->SHeight),logger::dbg);
-    // logger::log("Image count: "+std::to_string(sprite->ImageCount),logger::dbg);
 
     logger::log("Getting pixel data from STB...",logger::dbg);
     int iw,ih,ic;
-    // stbi_uc *pxs = stbi_load(path.c_str(),&sprite->SWidth,&sprite->SHeight,&channels,STBI_rgb_alpha);
     stbi_uc *pxs = stbi_load(path.c_str(),&iw,&ih,&ic,STBI_rgb_alpha);
     if (!pxs) {
-        logger::log("Failed to load texture file \""+path+"\"!",logger::exc);
+        logger::log("Failed to load texture file \""+path.string()+"\"!",logger::exc);
         exit(1);
     }
 
     logger::log("Creating window object...",logger::dbg);
 
-    // konanix w(sprite->SWidth,sprite->SHeight);
     konanix w(iw,ih);
     w.image_size = iw*ih*4;
     try {
         w.initialize();
     } catch (std::exception &e) {
-        logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
+        logger::log("Could not initialize Vulkan! Exception details: "+std::string(e.what()),logger::err);
         exit(1);
     }
 
@@ -831,9 +816,9 @@ int main(int argc, char *argv[]) {
 
     size_t frame_index = 0;
     auto next_frame_time = std::chrono::steady_clock::now() +
-        std::chrono::milliseconds(std::max(1, anim.frames[0].delay_ms));
+    std::chrono::milliseconds(std::max(1, anim.frames[0].delay_ms));
     logger::log("Initialized!");
-    logger::log("Started rendering loop!",logger::dbg);
+    logger::log("Started rendering loop!");
     while (!glfwWindowShouldClose(w.g_window)) {
         glfwPollEvents();
 

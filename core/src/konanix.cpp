@@ -229,8 +229,8 @@ static VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR &capabilitie
     }
 }
 
-static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR> availableFormats) {
-    for (const auto& f : availableFormats) {
+static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR> available_formats) {
+    for (const VkSurfaceFormatKHR& f : available_formats) {
         if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
              f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
             f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -238,7 +238,7 @@ static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurface
         }
     }
 
-    for (const auto& f : availableFormats) {
+    for (const VkSurfaceFormatKHR& f : available_formats) {
         if ((f.format == VK_FORMAT_B8G8R8A8_UNORM ||
              f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
             f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -246,19 +246,19 @@ static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurface
         }
     }
 
-    for (const auto& f : availableFormats) {
+    for (const VkSurfaceFormatKHR& f : available_formats) {
         if (f.format == VK_FORMAT_B8G8R8_SRGB &&
             f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return f;
         }
     }
 
-    return availableFormats[0];
+    return available_formats[0];
 
 }
 
-static VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentModeKHR> &availablePresentModes) {
-    for (const auto& availablePresentMode : availablePresentModes) {
+static VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentModeKHR> &available_present_modes) {
+    for (const VkPresentModeKHR& availablePresentMode : available_present_modes) {
         if (availablePresentMode==VK_PRESENT_MODE_MAILBOX_KHR) return availablePresentMode;
     }
     return VK_PRESENT_MODE_FIFO_KHR; // best default option
