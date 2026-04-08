@@ -230,22 +230,31 @@ static VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR &capabilitie
 }
 
 static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR> availableFormats) {
-    for (const auto& availableFormat : availableFormats) {
-        if (availableFormat.format==VK_FORMAT_B8G8R8_SRGB&&availableFormat.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return availableFormat;
+    for (const auto& f : availableFormats) {
+        if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
+             f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
+            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return f;
+        }
     }
-    // for (const auto& f : availableFormats) {
-    //     if (f.format == VK_FORMAT_B8G8R8A8_SRGB &&
-    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-    //         return f;
-    //     }
-    // }
-    // for (const auto& f : availableFormats) {
-    //     if (f.format == VK_FORMAT_B8G8R8A8_UNORM &&
-    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-    //         return f;
-    //     }
-    // }
-    return availableFormats[0]; // TODO: make a ranking system for the next best format
+
+    for (const auto& f : availableFormats) {
+        if ((f.format == VK_FORMAT_B8G8R8A8_UNORM ||
+             f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
+            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return f;
+        }
+    }
+
+    for (const auto& f : availableFormats) {
+        if (f.format == VK_FORMAT_B8G8R8_SRGB &&
+            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return f;
+        }
+    }
+
+    return availableFormats[0];
+
 }
 
 static VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentModeKHR> &availablePresentModes) {
@@ -273,7 +282,7 @@ static std::vector<char> read_file(const std::string& file) {
 }
 
 static VkShaderModule create_shader_module(const VkDevice device, const std::vector<char> &code) {
-    const VkShaderModuleCreateInfo createInfo {
+    const VkShaderModuleCreateInfo shader_info {
         VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         VK_NULL_HANDLE,
         0,
@@ -282,7 +291,7 @@ static VkShaderModule create_shader_module(const VkDevice device, const std::vec
     };
 
     VkShaderModule s_module;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &s_module)) {
+    if (vkCreateShaderModule(device, &shader_info, nullptr, &s_module)) {
         logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
         throw std::runtime_error("failed to create a shader module");
     }
@@ -614,33 +623,33 @@ void konanix::create_instance() {
     //     glfwGetRequiredInstanceExtensions(&extension_count)
     // };
 
-    VkInstanceCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
+    VkInstanceCreateInfo instance_info{};
+    instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instance_info.pApplicationInfo = &appInfo;
 #ifdef __APPLE__
     // copy glfw extensions and add portability enumeration
     std::vector<const char*> requiredExtensions;
     for (uint32_t i = 0; i < extension_count; ++i) requiredExtensions.emplace_back(glfw_extensions[i]);
     requiredExtensions.emplace_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    instance_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #ifdef DEBUG
     requiredExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 #endif
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
-    createInfo.ppEnabledExtensionNames = requiredExtensions.data();
+    instance_info.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
+    instance_info.ppEnabledExtensionNames = requiredExtensions.data();
 #else
 #ifdef DEBUG
     std::vector<const char*> extensions(glfw_extensions,glfw_extensions+extension_count);
     extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
-    createInfo.ppEnabledExtensionNames = extensions.data();
+    instance_info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    instance_info.ppEnabledExtensionNames = extensions.data();
 #else
-    createInfo.ppEnabledExtensionNames = glfw_extensions;
-    createInfo.enabledExtensionCount = extension_count;
+    instance_info.ppEnabledExtensionNames = glfw_extensions;
+    instance_info.enabledExtensionCount = extension_count;
 #endif
 #endif
 
-    if (vkCreateInstance(&createInfo,nullptr,&g_instance) != VK_SUCCESS) {
+    if (vkCreateInstance(&instance_info,nullptr,&g_instance) != VK_SUCCESS) {
         logger::log("<Vulkan> Failed to create a Vulkan instance!",logger::exc);
         throw std::runtime_error("failed to create instance");
     }
@@ -685,7 +694,7 @@ void konanix::create_device() {
     std::set<uint32_t> uniqueQueueFamilies = {qfi.graphicsFamily.value(),qfi.presentFamily.value()};
     float queue_priority = 1.0f;
     for (uint32_t queue_family : uniqueQueueFamilies) {
-        const VkDeviceQueueCreateInfo queueCreateInfo {
+        const VkDeviceQueueCreateInfo queue_info {
             VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             VK_NULL_HANDLE,
             0,
@@ -693,10 +702,10 @@ void konanix::create_device() {
             1,
             &queue_priority
         };
-        queue_create_info_vec.push_back(queueCreateInfo);
+        queue_create_info_vec.push_back(queue_info);
     }
 
-    const VkDeviceCreateInfo createInfo {
+    const VkDeviceCreateInfo device_info {
         VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         VK_NULL_HANDLE,
         0,
@@ -709,7 +718,7 @@ void konanix::create_device() {
         &required_features
     };
 
-    if (vkCreateDevice(g_physicaldevice,&createInfo,nullptr,&g_device) != VK_SUCCESS) {
+    if (vkCreateDevice(g_physicaldevice,&device_info,nullptr,&g_device) != VK_SUCCESS) {
         logger::log("<Vulkan> Failed to create a logical device!",logger::exc);
         throw std::runtime_error("failed to create a logical device");
     }
@@ -737,35 +746,39 @@ void konanix::create_swap_chain() {
         image_count = swap_chain_support.capabilities.maxImageCount;
     }
 
-    VkSwapchainCreateInfoKHR createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    createInfo.surface = g_surface;
-    createInfo.minImageCount = image_count;
+    VkSwapchainCreateInfoKHR swapchain_info{};
+    swapchain_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchain_info.surface = g_surface;
+    swapchain_info.minImageCount = image_count;
 
-    createInfo.imageFormat = surface_format.format;
-    createInfo.imageColorSpace = surface_format.colorSpace;
+    swapchain_info.imageFormat = surface_format.format;
+    swapchain_info.imageColorSpace = surface_format.colorSpace;
 
-    createInfo.imageExtent = extent;
+    swapchain_info.imageExtent = extent;
 
-    createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // change to VK_IMAGE_USAGE_TRANSFER_DST_BIT in the future if implementing post-processing
+    swapchain_info.imageArrayLayers = 1;
+    swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    logger::log("<Vulkan> Swapchain format selected: " + std::to_string(surface_format.format)+", color space: " + std::to_string(surface_format.colorSpace),logger::dbg);
+    logger::log("<Vulkan> Composite alpha selected: " + std::to_string(swapchain_info.compositeAlpha),logger::dbg);
+    logger::log("<Vulkan> Supported composite alpha flags: "+std::to_string(swap_chain_support.capabilities.supportedCompositeAlpha),logger::dbg);
 
     QueueFamilyIndices indices = find_queue_families(g_physicaldevice, g_surface);
     uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
 
     if (indices.graphicsFamily != indices.presentFamily) {
-        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        createInfo.queueFamilyIndexCount = 2;
-        createInfo.pQueueFamilyIndices = queueFamilyIndices;
+        swapchain_info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        swapchain_info.queueFamilyIndexCount = 2;
+        swapchain_info.pQueueFamilyIndices = queueFamilyIndices;
         logger::log("<Vulkan> Swap chain will be using \"VK_SHARING_MODE_CONCURRENT\".",logger::dbg);
     } else {
-        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        createInfo.queueFamilyIndexCount = 0; // optional
-        createInfo.pQueueFamilyIndices = nullptr; // optional
+        swapchain_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        swapchain_info.queueFamilyIndexCount = 0;
+        swapchain_info.pQueueFamilyIndices = nullptr;
         logger::log("<Vulkan> Swap chain will be using \"VK_SHARING_MODE_EXCLUSIVE\".",logger::dbg);
     }
-    createInfo.preTransform = swap_chain_support.capabilities.currentTransform;
-    createInfo.compositeAlpha =
+    swapchain_info.preTransform = swap_chain_support.capabilities.currentTransform;
+    swapchain_info.compositeAlpha =
     (swap_chain_support.capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
         ? VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR
         : (swap_chain_support.capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)
@@ -774,11 +787,11 @@ void konanix::create_swap_chain() {
                 ? VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR
                 : VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 
-    createInfo.presentMode = present_mode;
-    createInfo.clipped = VK_TRUE; // enable if full rendering is required in the future https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Swap_chain
+    swapchain_info.presentMode = present_mode;
+    swapchain_info.clipped = VK_TRUE; // enable if full rendering is required in the future https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Swap_chain
 
-    createInfo.oldSwapchain = VK_NULL_HANDLE; // TODO: MAKE REBUILDABLE SWAPCHAINS
-    if (vkCreateSwapchainKHR(g_device,&createInfo,nullptr,&g_swapchain)!=VK_SUCCESS) {
+    swapchain_info.oldSwapchain = VK_NULL_HANDLE; // TODO: MAKE REBUILDABLE SWAPCHAINS
+    if (vkCreateSwapchainKHR(g_device,&swapchain_info,nullptr,&g_swapchain)!=VK_SUCCESS) {
         logger::log("<Vulkan> Failed to create swap chain!",logger::exc);
         throw std::runtime_error("failed to create swap chain");
     }
@@ -797,7 +810,7 @@ void konanix::create_swap_chain() {
 void konanix::create_image_views() {
     g_swapchain_image_views.resize(g_swapchain_images.size());
     for (size_t i = 0; i < g_swapchain_images.size(); i++) {
-        const VkImageViewCreateInfo createInfo {
+        const VkImageViewCreateInfo imageview_info {
             VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             VK_NULL_HANDLE,
             0,
@@ -821,7 +834,7 @@ void konanix::create_image_views() {
             }
         };
 
-        if (vkCreateImageView(g_device,&createInfo,nullptr,&g_swapchain_image_views[i])) {
+        if (vkCreateImageView(g_device,&imageview_info,nullptr,&g_swapchain_image_views[i])) {
             logger::log("<Vulkan> Failed to create swap chain!",logger::exc);
             throw std::runtime_error("failed to create swap chain");
         }

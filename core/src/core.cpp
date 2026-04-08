@@ -283,7 +283,7 @@ void konanix::create_image(uint32_t width, uint32_t height, VkFormat format, VkI
         VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         VK_NULL_HANDLE,
         mem_requirements.size,
-        ::find_memory_type(mem_requirements.memoryTypeBits, properties, g_physicaldevice)
+        find_memory_type(mem_requirements.memoryTypeBits, properties)
     };
 
     if (vkAllocateMemory(g_device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
@@ -303,7 +303,7 @@ void konanix::create_image(uint32_t width, uint32_t height, VkFormat format, VkI
     logger::log("Allocated memory for Vulkan image!",logger::dbg);
 }
 
-static VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format) {
+VkImageView konanix::create_image_view(VkImage image, VkFormat format) {
     const VkImageViewCreateInfo view_info {
         VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         VK_NULL_HANDLE,
@@ -328,16 +328,16 @@ static VkImageView create_image_view(VkDevice device, VkImage image, VkFormat fo
     };
 
     VkImageView image_view = VK_NULL_HANDLE;
-    if (vkCreateImageView(device,&view_info,nullptr,&image_view) != VK_SUCCESS) {
+    if (vkCreateImageView(g_device,&view_info,nullptr,&image_view) != VK_SUCCESS) {
         throw std::runtime_error("failed to create image view");
     } 
 
     return image_view;
 }
 
-static VkSampler create_sampler(VkPhysicalDevice p_device, VkDevice device) {
+VkSampler konanix::create_sampler() {
     VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(p_device,&properties);
+    vkGetPhysicalDeviceProperties(g_physicaldevice,&properties);
 
     const VkSamplerCreateInfo sampler_info {
         VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -362,7 +362,7 @@ static VkSampler create_sampler(VkPhysicalDevice p_device, VkDevice device) {
     };
 
     VkSampler sampler = VK_NULL_HANDLE;
-    if (vkCreateSampler(device,&sampler_info,nullptr,&sampler) != VK_SUCCESS) {
+    if (vkCreateSampler(g_device,&sampler_info,nullptr,&sampler) != VK_SUCCESS) {
         throw std::runtime_error("failed to create sampler");
     }
     return sampler;
@@ -456,8 +456,8 @@ void konanix::create_gif_image(uint32_t width, uint32_t height) {
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     g_gif_image,g_gif_image_memory);
 
-    g_gif_image_view = create_image_view(g_device, g_gif_image, format);
-    g_gif_sampler = create_sampler(g_physicaldevice, g_device);
+    g_gif_image_view = create_image_view(g_gif_image, format);
+    g_gif_sampler = create_sampler();
 }
 
 static std::vector<uint8_t> read_binary_file(const std::string& path) {

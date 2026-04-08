@@ -34,6 +34,8 @@ public:
     void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload = false);
     void transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
     void copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+    VkSampler create_sampler();
+    VkImageView create_image_view(VkImage image, VkFormat format);
     VkDevice get_device() const { return g_device; };
     uint32_t width, height;
     VkDeviceSize image_size;
