@@ -9,11 +9,14 @@
 #include <string>
 #include <stdlib.h>
 #include <vulkan/vulkan_core.h>
+#include <fstream>
+#include <chrono>
 
 #include <gif_lib.h>
 
 // #define STB_ONLY_GIF
 #define STB_IMAGE_IMPLEMENTATION
+#define STBI_NO_THREAD_LOCALS
 #include "./third_party/stb_image.h"
 // #include <ktx.h>
 
@@ -22,9 +25,12 @@
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
 
-struct GifFrame {
-    std::vector<uint8_t> rgba; // w*h *4
-    uint32_t delay_ms;
+struct GifAnimation {
+    int width = 0;
+    int height = 0;
+    int frame_count = 0;
+    std::vector<uint8_t> rgba;      // frame_count * width * height * 4
+    std::vector<int> delays_raw;    // stb data per frame
 };
 
 VkDevice device = VK_NULL_HANDLE;
@@ -45,8 +51,8 @@ static uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags pro
     throw std::runtime_error("failed to find a suitable memory type");
 }
 
-static void create_image(VkPhysicalDevice p_device, VkDevice device, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, 
-                        VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory) {
+void konanix::create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
+                            VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory) {
     const VkImageCreateInfo image_info {
         VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         VK_NULL_HANDLE,
@@ -66,25 +72,28 @@ static void create_image(VkPhysicalDevice p_device, VkDevice device, uint32_t wi
         VK_IMAGE_LAYOUT_UNDEFINED
     };
 
-    if (vkCreateImage(device,&image_info,nullptr,&image) != VK_SUCCESS) {
+    if (vkCreateImage(g_device,&image_info,nullptr,&image) != VK_SUCCESS) {
+        logger::log("Failed to create image!",logger::exc);
         throw std::runtime_error("failed to create image");
     }
-
+    logger::log("Vulkan image created!",logger::dbg);
     VkMemoryRequirements mem_requirements{};
-    vkGetImageMemoryRequirements(device, image, &mem_requirements);
+    vkGetImageMemoryRequirements(g_device, image, &mem_requirements);
 
     const VkMemoryAllocateInfo alloc_info{
         VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         VK_NULL_HANDLE,
         mem_requirements.size,
-        find_memory_type(mem_requirements.memoryTypeBits, properties, p_device)
+        find_memory_type(mem_requirements.memoryTypeBits, properties)
     };
 
-    if (vkAllocateMemory(device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
-        vkDestroyImage(device,image,nullptr);
+    if (vkAllocateMemory(g_device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
+        vkDestroyImage(g_device,image,nullptr);
         image = VK_NULL_HANDLE;
+        logger::log("Failed to bind image memory!",logger::exc);
         throw std::runtime_error("failed to bind image memory");
     }
+    logger::log("Allocated memory for Vulkan image!",logger::dbg);
 }
 
 static VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format) {
@@ -234,7 +243,7 @@ void konanix::create_descriptor_set_layout() {
 void konanix::create_gif_image(uint32_t width, uint32_t height) {
     constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
 
-    create_image(g_physicaldevice, g_device,width,height,format,
+    create_image(width,height,format,
     VK_IMAGE_TILING_OPTIMAL,
     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -242,6 +251,288 @@ void konanix::create_gif_image(uint32_t width, uint32_t height) {
 
     g_gif_image_view = create_image_view(g_device, g_gif_image, format);
     g_gif_sampler = create_sampler(g_physicaldevice, g_device);
+}
+
+static std::vector<uint8_t> read_binary_file(const std::string& path) {
+    logger::log("Parsing \""+path+"\"...",logger::dbg);
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        logger::log("Unable to open \""+path+"\"!",logger::exc);
+        throw std::runtime_error("failed to open file: " + path);
+    }
+
+    const std::streamsize size = file.tellg();
+    if (size <= 0) {
+        logger::log("File \""+path+"\" is empty!",logger::exc);
+        throw std::runtime_error("empty file: " + path);
+    }
+
+    std::vector<uint8_t> data(static_cast<size_t>(size));
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char*>(data.data()), size)) {
+        logger::log("Unable to read \""+path+"\"!",logger::exc);
+        throw std::runtime_error("failed to read file: " + path);
+    }
+    logger::log("Read \""+path+"\"!",logger::dbg);
+    return data;
+}
+
+static GifAnimation load_gif_animation(const std::string& path) {
+    GifAnimation gif{};
+    logger::log("Storing GIF to memory...",logger::dbg);
+    const std::vector<uint8_t> file_bytes = read_binary_file(path);
+    int* delays = nullptr;
+    int comp = 0;
+    int frames = 0;
+
+    logger::log("Loading GIF from memory (STB)...",logger::dbg);
+    stbi_uc* pixels;
+    //  = stbi_load_gif_from_memory( // borked
+    //     file_bytes.data(),
+    //     static_cast<int>(file_bytes.size()),
+    //     &delays,
+    //     &gif.width,
+    //     &gif.height,
+    //     &frames,
+    //     &comp,
+    //     4
+    // );
+   stbi__context s; 
+   stbi__start_mem(&s,file_bytes.data(),static_cast<int>(file_bytes.size())); 
+    logger::log("Pixels loaded to memory!",logger::dbg);
+   
+   pixels = (unsigned char*) stbi__load_gif_main(&s, &delays, &gif.height, &gif.width, &gif.frame_count, &comp, 4);
+   logger::log("GIF data loaded form memory!",logger::dbg);
+   
+   if (stbi__vertically_flip_on_load) {
+      stbi__vertical_flip_slices(pixels,gif.width,gif.height,gif.frame_count,comp); 
+   }
+
+
+    if (!pixels) {
+        logger::log("STB failed to load GIF data: "+
+            std::string((stbi_failure_reason() ? stbi_failure_reason() : "unknown")),logger::dbg);
+        throw std::runtime_error(std::string("stbi_load_gif_from_memory failed: ") +
+                                 (stbi_failure_reason() ? stbi_failure_reason() : "unknown"));
+    }
+
+    if (frames <= 0) {
+        stbi_image_free(pixels);
+        stbi_image_free(delays);
+        throw std::runtime_error("GIF has no frames");
+    }
+
+    gif.frame_count = static_cast<uint32_t>(frames);
+    const size_t frame_bytes = static_cast<size_t>(gif.width) * gif.height * 4;
+    gif.rgba.assign(pixels, pixels + frame_bytes * gif.frame_count);
+
+    gif.delays_raw.resize(gif.frame_count);
+    for (uint32_t i = 0; i < gif.frame_count; ++i) {
+        gif.delays_raw[i] = delays ? delays[i] : 100;
+        if (gif.delays_raw[i] <= 0) gif.delays_raw[i] = 100;
+    }
+
+    stbi_image_free(pixels);
+    stbi_image_free(delays);
+    return gif;
+}
+
+static inline const uint8_t* gif_frame_ptr(const GifAnimation& gif, uint32_t frame_index) {
+    const size_t frame_bytes = static_cast<size_t>(gif.width) * gif.height * 4;
+    return gif.rgba.data() + frame_bytes * frame_index;
+}
+
+// Vulkan helpers
+VkCommandBuffer konanix::begin_single_time_commands() {
+    VkCommandBufferAllocateInfo alloc_info{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        nullptr,
+        g_commandpool,
+        VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        1
+    };
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(g_device, &alloc_info, &cmd) != VK_SUCCESS) {
+        logger::log("Failed to allocate transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to allocate transient command buffer");
+    }
+
+    VkCommandBufferBeginInfo begin_info{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        nullptr,
+        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        nullptr
+    };
+
+    if (vkBeginCommandBuffer(cmd, &begin_info) != VK_SUCCESS) {
+        vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+        logger::log("Failed to begin transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to begin transient command buffer");
+    }
+
+    return cmd;
+}
+
+void konanix::end_single_time_commands(VkCommandBuffer cmd) {
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+        logger::log("Failed to end transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to end transient command buffer");
+    }
+
+    VkSubmitInfo submit_info{
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        nullptr,
+        0, nullptr, nullptr,
+        1, &cmd,
+        0, nullptr
+    };
+
+    if (vkQueueSubmit(g_graphicsqueue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, g_commandpool, 1, &cmd);
+        logger::log("Failed to submit transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to submit transient command buffer");
+    }
+
+    vkQueueWaitIdle(g_graphicsqueue);
+    vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+}
+
+void konanix::transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
+    VkCommandBuffer cmd = begin_single_time_commands();
+
+    VkImageMemoryBarrier barrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        nullptr,
+        0, 0,
+        old_layout,
+        new_layout,
+        VK_QUEUE_FAMILY_IGNORED,
+        VK_QUEUE_FAMILY_IGNORED,
+        image,
+        {
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0, 1,
+            0, 1
+        }
+    };
+
+    if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+        new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+               new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+               new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    } else {
+        vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+        logger::log("Unsupported image layout transition!",logger::exc);
+        throw std::runtime_error("unsupported image layout transition");
+    }
+
+    vkCmdPipelineBarrier(
+        cmd,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+
+    end_single_time_commands(cmd);
+}
+
+void konanix::copy_buffer_to_image(
+    VkBuffer buffer,
+    VkImage image,
+    uint32_t width,
+    uint32_t height
+) {
+    VkCommandBuffer cmd = begin_single_time_commands();
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {width, height, 1};
+
+    vkCmdCopyBufferToImage(
+        cmd,
+        buffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &region
+    );
+
+    end_single_time_commands(cmd);
+}
+
+void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload) {
+    VkBuffer staging_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+
+    create_buffer(
+        static_cast<VkDeviceSize>(pixel_bytes),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        staging_buffer,
+        staging_memory
+    );
+    logger::log("Created buffer for GIF frame",logger::dbg);
+
+    void* mapped = nullptr;
+    if (vkMapMemory(g_device, staging_memory, 0, pixel_bytes, 0, &mapped) != VK_SUCCESS) {
+        vkDestroyBuffer(g_device, staging_buffer, nullptr);
+        vkFreeMemory(g_device, staging_memory, nullptr);
+        logger::log("Failed to map staging memory!",logger::exc);
+        throw std::runtime_error("failed to map staging memory");
+    }
+
+    memcpy(mapped, rgba_pixels, pixel_bytes);
+    vkUnmapMemory(g_device, staging_memory);
+    logger::log("Moved GIF pixel data to \"pixel_bytes\"!",logger::dbg);
+
+    const VkImageLayout from_layout = first_upload
+        ? VK_IMAGE_LAYOUT_UNDEFINED
+        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    transition_image_layout(
+        g_gif_image,
+        from_layout,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+
+    copy_buffer_to_image(
+        staging_buffer,
+        g_gif_image,
+        width,
+        height
+    );
+    logger::log("Successfully copied buffer to image!",logger::dbg);
+
+    transition_image_layout(
+        g_gif_image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    vkDestroyBuffer(device, staging_buffer, nullptr);
+    vkFreeMemory(device, staging_memory, nullptr);
+    logger::log("Freed up unneeded memory!",logger::dbg);
 }
 
 int main(int argc, char *argv[]) {
@@ -390,42 +681,83 @@ int main(int argc, char *argv[]) {
         logger::log("Could not initialize Vulkan! Exception: "+std::string(e.what()),logger::err);
         exit(1);
     }
+    device = w.get_device();
 
-    VkBuffer staging_buffer;
-    VkDeviceMemory staging_buffer_memory;
-    const VkBufferCreateInfo buffer_info {
-        VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        VK_NULL_HANDLE,
-        // VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        w.image_size,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_SHARING_MODE_EXCLUSIVE,
-        0,
-        nullptr
-    };
+    // VkBuffer staging_buffer;
+    // VkDeviceMemory staging_buffer_memory;
+    // const VkBufferCreateInfo buffer_info {
+    //     VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+    //     VK_NULL_HANDLE,
+    //     // VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    //     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    //     w.image_size,
+    //     VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    //     VK_SHARING_MODE_EXCLUSIVE,
+    //     0,
+    //     nullptr
+    // };
 
-    w.create_buffer(w.image_size,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,staging_buffer,staging_buffer_memory);
-    
-    vkMapMemory(w.get_device(),staging_buffer_memory,0,w.image_size,0,&w.pxdata);
-    memcpy(w.pxdata,pxs,static_cast<size_t>(w.image_size));
-    vkUnmapMemory(w.get_device(),staging_buffer_memory);
-    logger::log("GIF pixel data stored!",logger::dbg);
+    // w.create_buffer(w.image_size,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,staging_buffer,staging_buffer_memory);
+
+    // logger::log("Mapping memory...",logger::dbg);
+    // vkMapMemory(w.get_device(),staging_buffer_memory,0,w.image_size,0,&w.pxdata);
+    // memcpy(w.pxdata,pxs,static_cast<size_t>(w.image_size));
+    // vkUnmapMemory(w.get_device(),staging_buffer_memory);
+    // logger::log("GIF pixel data stored!",logger::dbg);
     // w.create_gif_image(iw,ih);
-    stbi_image_free(pxs);
-
+    // stbi_image_free(pxs);
     // TODO:
     // update fragment shader (sample gif image)
     // per-frame upload to texture
     // bind descriptor
+    logger::log("Loading animated GIF...", logger::dbg);
+    GifAnimation gif = load_gif_animation(path);
+    logger::log("Loaded! Creating GIF image...", logger::dbg);
+    
+    w.image_size = gif.width * gif.height * 4;
+    w.create_gif_image(gif.width, gif.height);
+    logger::log("GIF image created!", logger::dbg);
+    
+    // upload first frame
+    w.upload_rgba_frame_to_gif_image(
+        gif_frame_ptr(gif, 0),
+        static_cast<size_t>(gif.width) * gif.height * 4,
+        gif.width,
+        gif.height,
+        true
+    );
+    logger::log("Frame uploaded successfully!", logger::dbg);
+    
+    stbi_image_free(nullptr);
+    
+    auto next_frame_time = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(std::max(1, gif.delays_raw[0]));
+    
+    uint32_t frame_index = 0;
+    logger::log("GIF loaded!", logger::dbg);
+
 
     while (!glfwWindowShouldClose(w.g_window)) {
-        glfwPollEvents();
+            glfwPollEvents();
+
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= next_frame_time && gif.frame_count > 0) {
+                frame_index = (frame_index + 1) % gif.frame_count;
+            
+                w.upload_rgba_frame_to_gif_image(
+                    gif_frame_ptr(gif, frame_index),
+                    static_cast<size_t>(gif.width) * gif.height * 4,
+                    gif.width,
+                    gif.height,
+                    false
+                );
+            
+                next_frame_time = now + std::chrono::milliseconds(std::max(1, gif.delays_raw[frame_index]));
+            }
         w.draw_frame();
         
     }
 
-    device = w.get_device();
     if (g_gif_sampler != VK_NULL_HANDLE) {
         vkDestroySampler(device, g_gif_sampler, nullptr);
         g_gif_sampler = VK_NULL_HANDLE;
@@ -451,10 +783,20 @@ int main(int argc, char *argv[]) {
 void konanix::draw_frame() {
     
     vkWaitForFences(g_device,1,&g_in_flight_fences[current_frame],VK_TRUE,UINT64_MAX);
-    vkResetFences(g_device,1,&g_in_flight_fences[current_frame]);
+    // vkResetFences(g_device,1,&g_in_flight_fences[current_frame]);
 
     uint32_t image_index;
-    vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+    // vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+    VkResult result = vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreate_swap_chain();
+        return;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        logger::log("<Vulkan> Failed to acquire swap chain image!",logger::exc);
+        throw std::runtime_error("failed to acquire swap chain image");
+    }    
+    
+    vkResetFences(g_device,1,&g_in_flight_fences[current_frame]);
 
     vkResetCommandBuffer(g_commandbuffers[current_frame],0);
     record_command_buffer(g_commandbuffers[current_frame], image_index);

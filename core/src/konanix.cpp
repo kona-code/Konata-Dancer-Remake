@@ -279,82 +279,82 @@ static VkShaderModule create_shader_module(const VkDevice device, const std::vec
 }
 
 
-VkCommandBuffer konanix::begin_single_time_commands() {
-    const VkCommandBufferAllocateInfo alloc_info {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        VK_NULL_HANDLE,
+// VkCommandBuffer konanix::begin_single_time_commands() { // moved to core
+//     const VkCommandBufferAllocateInfo alloc_info {
+//         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+//         VK_NULL_HANDLE,
 
-        g_commandpool,
-        VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        1
-    };
+//         g_commandpool,
+//         VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+//         1
+//     };
     
-    VkCommandBuffer command_buffer;
-    vkAllocateCommandBuffers(g_device, &alloc_info, &command_buffer);
+//     VkCommandBuffer command_buffer;
+//     vkAllocateCommandBuffers(g_device, &alloc_info, &command_buffer);
     
-    VkCommandBufferBeginInfo begin_info{
-    VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    VK_NULL_HANDLE,
-    VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    VK_NULL_HANDLE
-    };
+//     VkCommandBufferBeginInfo begin_info{
+//     VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+//     VK_NULL_HANDLE,
+//     VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+//     VK_NULL_HANDLE
+//     };
 
-    vkBeginCommandBuffer(command_buffer, &begin_info);
-    return command_buffer;
-}
+//     vkBeginCommandBuffer(command_buffer, &begin_info);
+//     return command_buffer;
+// }
 
-void konanix::end_single_time_commands(VkCommandBuffer buffer) {
-    vkEndCommandBuffer(buffer);
+// void konanix::end_single_time_commands(VkCommandBuffer buffer) { // moved to core
+//     vkEndCommandBuffer(buffer);
     
-    const VkSubmitInfo submitInfo {
-        VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        VK_NULL_HANDLE,
+//     const VkSubmitInfo submitInfo {
+//         VK_STRUCTURE_TYPE_SUBMIT_INFO,
+//         VK_NULL_HANDLE,
 
-        0,
-        VK_NULL_HANDLE,
-        0,
+//         0,
+//         VK_NULL_HANDLE,
+//         0,
 
-        1,
-        &buffer,
+//         1,
+//         &buffer,
 
-        0,
-        VK_NULL_HANDLE
-    };
+//         0,
+//         VK_NULL_HANDLE
+//     };
 
-    vkQueueSubmit(g_graphicsqueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(g_graphicsqueue);
-    vkFreeCommandBuffers(g_device, g_commandpool, 1, &buffer);
-}
+//     vkQueueSubmit(g_graphicsqueue, 1, &submitInfo, VK_NULL_HANDLE);
+//     vkQueueWaitIdle(g_graphicsqueue);
+//     vkFreeCommandBuffers(g_device, g_commandpool, 1, &buffer);
+// }
 
-void konanix::copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height) {
-    VkCommandBuffer command_buffer = begin_single_time_commands();
+// void konanix::copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height) { // moved to core
+//     VkCommandBuffer command_buffer = begin_single_time_commands();
 
-    const VkBufferImageCopy region {
-        0,
-        0,
-        0,
-        {
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            0,
-            0,
-            1
-        },
-        {
-            0,
-            0,
-            0,
-        },
-        {
-            width,
-            height,
-            1
-        }
-    };
+//     const VkBufferImageCopy region {
+//         0,
+//         0,
+//         0,
+//         {
+//             VK_IMAGE_ASPECT_COLOR_BIT,
+//             0,
+//             0,
+//             1
+//         },
+//         {
+//             0,
+//             0,
+//             0,
+//         },
+//         {
+//             width,
+//             height,
+//             1
+//         }
+//     };
 
-    vkCmdCopyBufferToImage(command_buffer,buffer,image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
+//     vkCmdCopyBufferToImage(command_buffer,buffer,image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
 
-    end_single_time_commands(command_buffer);
-}
+//     end_single_time_commands(command_buffer);
+// }
 
 uint32_t konanix::find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties mem_properties;
@@ -1115,6 +1115,8 @@ void konanix::create_framebuffers() {
         }
     }
 }
+
+
 
 void konanix::create_commandpool() {
     logger::log("<Vulkan> Creating command pool...",logger::dbg);
