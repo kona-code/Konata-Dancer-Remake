@@ -302,11 +302,108 @@ static GifAnimation load_gif_animation(const std::string& path) {
    stbi__start_mem(&s,file_bytes.data(),static_cast<int>(file_bytes.size())); 
     logger::log("Pixels loaded to memory!",logger::dbg);
    
-   pixels = (unsigned char*) stbi__load_gif_main(&s, &delays, &gif.height, &gif.width, &gif.frame_count, &comp, 4);
+//    pixels = (unsigned char*) stbi__load_gif_main(&s, &delays, &gif.height, &gif.width, &frames, &comp, 4);
+   if (stbi__gif_test(&s)) {
+      int layers = 0;
+      stbi_uc *u = 0;
+      stbi_uc *out = 0;
+      stbi_uc *two_back = 0;
+      stbi__gif g;
+      int stride;
+      int out_size = 0;
+      int delays_size = 0;
+
+      STBI_NOTUSED(out_size);
+      STBI_NOTUSED(delays_size);
+
+      memset(&g, 0, sizeof(g));
+      if (delays) {
+         *delays = 0;
+      }
+
+      do {
+        //  logger::log("Calling stbi__gif_load_next()...",logger::dbg);
+         u = stbi__gif_load_next(&s, &g, &comp, /*req_comp*/4, two_back); //borked
+        //  logger::log("Call suceeded",logger::dbg);
+         if (u == (stbi_uc *) &s) u = 0;  // end of animated gif marker
+
+         if (u) {
+            logger::log("STB loading image...",logger::dbg);
+            gif.height = std::move(g.w);
+            gif.width = std::move(g.h);
+            ++layers;
+            stride = g.w * g.h * 4;
+
+            if (out) {
+               void *tmp = (stbi_uc*) STBI_REALLOC_SIZED( out, out_size, layers * stride );
+               if (!tmp) {
+                pixels = (unsigned char*) stbi__load_gif_main_outofmem(&g, out, &delays);
+                logger::log("STB out of memory!.",logger::dbg);
+                break; 
+               }
+               else {
+                   out = (stbi_uc*) tmp;
+                   out_size = layers * stride;
+               }
+
+               if (delays) {
+                  int *new_delays = (int*) STBI_REALLOC_SIZED(delays, delays_size, sizeof(int) * layers );
+                  if (!new_delays) {
+                     pixels = (unsigned char*) stbi__load_gif_main_outofmem(&g, out, &delays);
+                     logger::log("STB out of memory!.",logger::dbg);
+                     break;
+                  }
+                  *delays = *new_delays;
+                  delays_size = layers * sizeof(int);
+               }
+            } else {
+               out = (stbi_uc*)stbi__malloc( layers * stride );
+               if (!out) {
+                  pixels = (unsigned char*) stbi__load_gif_main_outofmem(&g, out, &delays);
+                  logger::log("STB out of memory!.",logger::dbg);
+                  break;
+               }
+               out_size = layers * stride;
+               if (delays) {
+                  *delays = *   (int*) stbi__malloc(layers * sizeof(int));
+                  if (!*delays) {
+                     pixels = (unsigned char*) stbi__load_gif_main_outofmem(&g, out, &delays);
+                    logger::log("STB out of memory!.",logger::dbg);
+                     break;
+                  }
+                  delays_size = layers * sizeof(int);
+               }
+            }
+            memcpy( out + ((layers - 1) * stride), u, stride );
+            if (layers >= 2) {
+               two_back = out - 2 * stride;
+            }
+
+            if (delays) {
+               (*delays)[&layers - 1U] = g.delay;
+            }
+            logger::log("STB image loaded.",logger::dbg);
+         }
+      } while (u != 0);
+
+      // free temp buffer;
+      STBI_FREE(g.out);
+      STBI_FREE(g.history);
+      STBI_FREE(g.background);
+
+      // do the final conversion after loading everything;
+    //   if (req_comp && req_comp != 4)
+      pixels = stbi__convert_format(out, 4, 4, layers * g.w, g.h);
+
+      gif.frame_count = layers;
+//    } else {
+//       return stbi__errpuc("not GIF", "Image was not as a gif type.");
+//    }
+    }
    logger::log("GIF data loaded form memory!",logger::dbg);
    
    if (stbi__vertically_flip_on_load) {
-      stbi__vertical_flip_slices(pixels,gif.width,gif.height,gif.frame_count,comp); 
+      stbi__vertical_flip_slices(pixels,gif.width,gif.height,frames,comp); 
    }
 
 
