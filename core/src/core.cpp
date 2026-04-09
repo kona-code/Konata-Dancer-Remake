@@ -28,6 +28,8 @@
 
 #include <signal.h>
 
+#include "konata.c"
+
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
 
@@ -40,6 +42,12 @@ struct GifAnimation {
     int width = 0;
     int height = 0;
     std::vector<GifFrame> frames;
+};
+
+struct MemoryGifReader {
+    const unsigned char *data;
+    size_t size;
+    size_t pos;
 };
 
 std::filesystem::path path;
@@ -166,10 +174,59 @@ static void draw_indexed_frame(std::vector<uint8_t>& canvas,
     }
 }
 
+static int read_from_memory(GifFileType *gif, GifByteType *dst, int len)
+{
+    MemoryGifReader *r = (MemoryGifReader *)gif->UserData;
+    size_t remaining = r->size - r->pos;
+
+    if (remaining == 0)
+        return 0; // eof
+
+    if ((size_t)len > remaining)
+        len = (int)remaining;
+
+    memcpy(dst, r->data + r->pos, (size_t)len);
+    r->pos += (size_t)len;
+    return len;
+}
+
+GifFileType *open_gif_from_memory(const unsigned char *gif_bytes,
+                                  size_t gif_size,
+                                  int *err)
+{
+    MemoryGifReader *reader = static_cast<MemoryGifReader*>(malloc(sizeof(*reader)));
+    if (!reader)
+        return NULL;
+
+    reader->data = gif_bytes;
+    reader->size = gif_size;
+    reader->pos = 0;
+
+    GifFileType *gif = DGifOpen(reader, read_from_memory, err);
+    if (!gif) {
+        free(reader);
+        return NULL;
+    }
+
+    gif->UserData = reader;
+    return gif;
+}
+
+void close_gif_from_memory(GifFileType *gif)
+{
+    if (!gif) return;
+    free(gif->UserData);
+    DGifCloseFile(gif, NULL);
+}
+
 // main GIF loader
 static GifAnimation load_gif_animation(const std::filesystem::path& path) {
     int err = 0;
-    GifFileType* gif = DGifOpenFileName(path.string().c_str(), &err);
+    GifFileType* gif;
+    if (!path.empty())
+        gif = DGifOpenFileName(path.string().c_str(), &err);
+    else
+        gif = open_gif_from_memory(konata, konata_len, &err);
     if (!gif) {
         logger::log("DGifOpenFileName failed for \""+path.string()+"\"! Exception details: "+std::to_string(err),logger::exc);
         throw std::runtime_error("DGifOpenFileName failed for: " + path.string() + " err=" + std::to_string(err));
@@ -814,16 +871,16 @@ int main(int argc, char *argv[]) {
     logger::log("Initializing...");
     if (!path.empty()) {
         logger::log("Konata Dancer will be loading \""+path.string()+"\".");
-    } else { path = "./konata.gif"; }
+    } 
+    // else { path = "./konata.gif"; }
 
     logger::log("Getting pixel data from STB...",logger::dbg);
-    int iw,ih,ic;
-    stbi_uc *pxs = stbi_load(path.c_str(),&iw,&ih,&ic,STBI_rgb_alpha);
-    if (!pxs) {
-        logger::log("Failed to load texture file \""+path.string()+"\"!",logger::exc);
-        exit(1);
+    int iw,ih;
+    if (!path.empty())
+        stbi_load(path.c_str(),&iw,&ih,nullptr,STBI_rgb_alpha);
+    else {
+        iw = 640; ih = 480;
     }
-
     logger::log("Creating window object...",logger::dbg);
 
     konanix w(iw,ih);
