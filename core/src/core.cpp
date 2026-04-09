@@ -195,7 +195,7 @@ static GifAnimation load_gif_animation(const std::filesystem::path& path) {
         gif->SBackGroundColor < gif->SColorMap->ColorCount) {
         bg = gif_color_at(gif->SColorMap, gif->SBackGroundColor);
     }
-    fill_canvas(canvas, bg);
+    fill_canvas(canvas, {0,0,0,0});
 
     for (int i = 0; i < gif->ImageCount; ++i) {
         const SavedImage& img = gif->SavedImages[i];
