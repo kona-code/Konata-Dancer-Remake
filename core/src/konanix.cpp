@@ -31,6 +31,16 @@ struct QueueFamilyIndices {
     }
 };
 
+struct DragState {
+    bool dragging = false;
+    double press_cursor_x = 0.0;
+    double press_cursor_y = 0.0;
+    int press_window_x = 0;
+    int press_window_y = 0;
+};
+
+static DragState g_drag;
+
 // helpers
 static SwapChainSupportDetails query_swap_chain_support(const VkPhysicalDevice device, VkSurfaceKHR surface) {
     SwapChainSupportDetails details;
@@ -440,6 +450,32 @@ void konanix::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     vkBindBufferMemory(g_device,buffer,buffer_memory,0);
 }
 
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (button != GLFW_MOUSE_BUTTON_LEFT)
+        return;
+
+    if (action == GLFW_PRESS) {
+        double cx, cy;
+        glfwGetCursorPos(window, &cx, &cy);
+
+        g_drag.dragging = true;
+        g_drag.press_cursor_x = cx;
+        g_drag.press_cursor_y = cy;
+        glfwGetWindowPos(window, &g_drag.press_window_x, &g_drag.press_window_y);
+    } else if (action == GLFW_RELEASE) {
+        g_drag.dragging = false;
+    }
+}
+
+static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (!g_drag.dragging)
+        return;
+
+    const int new_x = g_drag.press_window_x + static_cast<int>(xpos - g_drag.press_cursor_x);
+    const int new_y = g_drag.press_window_y + static_cast<int>(ypos - g_drag.press_cursor_y);
+
+    glfwSetWindowPos(window, new_x, new_y);
+}
 
 
 
@@ -474,6 +510,9 @@ konanix::konanix(const uint32_t &w, const uint32_t &h)
         throw std::runtime_error("failed to create a glfw window");
     }
     glfwSetWindowSize(g_window,width,height);
+    glfwSetWindowAttrib(g_window, GLFW_DECORATED, GLFW_FALSE);
+    glfwSetMouseButtonCallback(g_window, mouse_button_callback);
+    glfwSetCursorPosCallback(g_window, cursor_pos_callback);
 }
 
 konanix::~konanix() {
