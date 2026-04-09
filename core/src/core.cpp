@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <stdlib.h>
+#include <thread>
 #include <vulkan/vulkan_core.h>
 #include <fstream>
 #include <chrono>
@@ -25,7 +26,7 @@
 #include "./third_party/stb_image.h"
 // #include <ktx.h>
 
-// #include <signal.h>
+#include <signal.h>
 
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
@@ -679,6 +680,32 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
     // logger::log("Freed up unneeded memory!",logger::dbg);
 }
 
+void terminate_handler(int s) {
+    logger::log("Caught signal "+std::to_string(s)+"! Terminating...");
+    konanix w;
+    if (g_gif_sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(w.get_device(), g_gif_sampler, nullptr);
+        g_gif_sampler = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image_view != VK_NULL_HANDLE) {
+        vkDestroyImageView(w.get_device(), g_gif_image_view, nullptr);
+        g_gif_image_view = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image != VK_NULL_HANDLE) {
+        vkDestroyImage(w.get_device(), g_gif_image, nullptr);
+        g_gif_image = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image_memory != VK_NULL_HANDLE) {
+        vkFreeMemory(w.get_device(), g_gif_image_memory, nullptr);
+        g_gif_image_memory = VK_NULL_HANDLE;
+    }
+    w.cleanup();
+    logger::log("Terminated successfully!");
+}
+
 int main(int argc, char *argv[]) {
 
     printf("[0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;7;7;7m [0m[38;2;25;19;16m [0m[38;2;33;23;18m [0m[38;2;42;31;26m.[0m[38;2;28;20;17m [0m[38;2;14;10;9m [0m[38;2;2;2;2m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m\n"
@@ -810,20 +837,25 @@ int main(int argc, char *argv[]) {
 
     logger::log("Loading animated GIF...", logger::dbg);
 
-    GifAnimation anim = load_gif_animation(path);
+    const GifAnimation anim = load_gif_animation(path);
     w.create_gif_image(anim.width, anim.height);
     w.create_descriptor_set();
+    struct sigaction sigIntHandler {
+        terminate_handler,
+        {static_cast<unsigned long>(sigemptyset(&sigIntHandler.sa_mask))},
+        0
+    };
 
+    sigaction(SIGINT, &sigIntHandler, NULL);
     size_t frame_index = 0;
-    auto next_frame_time = std::chrono::steady_clock::now() +
-    std::chrono::milliseconds(std::max(1, anim.frames[0].delay_ms));
+    // auto next_frame_time = std::chrono::steady_clock::now() +
+    // std::chrono::milliseconds(std::max(1, anim.frames[0].delay_ms));
     logger::log("Initialized!");
     logger::log("Started rendering loop!");
     while (!glfwWindowShouldClose(w.g_window)) {
-        glfwPollEvents();
-
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= next_frame_time) {
+        // const auto now = std::chrono::steady_clock::now();
+        // if (now >= next_frame_time) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(anim.frames[frame_index].delay_ms));
             const GifFrame& f = anim.frames[frame_index];
             w.upload_rgba_frame_to_gif_image(
                 f.rgba.data(),
@@ -834,10 +866,11 @@ int main(int argc, char *argv[]) {
             );
 
             frame_index = (frame_index + 1) % anim.frames.size();
-            next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
-        }
+            // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
+        // }
 
         w.draw_frame();
+        glfwPollEvents();
     }
 
     if (g_gif_sampler != VK_NULL_HANDLE) {
