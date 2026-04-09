@@ -757,14 +757,14 @@ int main(int argc, char *argv[]) {
     if (argc>0) {
         bool log_to_file = false, debug = false;
         for (int i = 1; i < argc; i++) {
-            const static std::string arg = argv[i];
+            const std::string arg = argv[i];
             if (arg == "-debug" || arg == "--debug" || arg == "-d") debug = true;
             else if (arg == "-log" || arg == "--log" || arg == "-l") log_to_file = true;
             else if (arg == "-file" || arg == "--file" || arg == "-f") {
                 try {
                     path = std::string(argv[++i]);
                 } catch (std::exception &e) {
-                    fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Unable to store \"%s\" into a std::string! Exception details: %s\033[0m\n",argv[i+1],e.what());
+                    fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Unable to store \"%s\" into a std::string! Error details: %s\033[0m\n",argv[i+1],e.what());
                 } catch (...) {
                     fprintf(stderr,"\033[31;1m[ERR]\033[0;31m Unable to store \"%s\" into a std::string!\033[0m\n",argv[i+1]);
                 }
