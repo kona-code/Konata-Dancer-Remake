@@ -251,12 +251,12 @@ static GifAnimation load_gif_animation(const std::filesystem::path& path) {
 
     std::vector<uint8_t> canvas(static_cast<size_t>(anim.width) * anim.height * 4, 0);
 
-    std::array<uint8_t, 4> bg = {0, 0, 0, 0};
-    if (gif->SColorMap &&
-        gif->SBackGroundColor >= 0 &&
-        gif->SBackGroundColor < gif->SColorMap->ColorCount) {
-        bg = gif_color_at(gif->SColorMap, gif->SBackGroundColor);
-    }
+    // std::array<uint8_t, 4> bg = {0, 0, 0, 0};
+    // if (gif->SColorMap &&
+    //     gif->SBackGroundColor >= 0 &&
+    //     gif->SBackGroundColor < gif->SColorMap->ColorCount) {
+    //     bg = gif_color_at(gif->SColorMap, gif->SBackGroundColor);
+    // }
     fill_canvas(canvas, {0,0,0,0});
 
     for (int i = 0; i < gif->ImageCount; ++i) {
@@ -286,7 +286,7 @@ static GifAnimation load_gif_animation(const std::filesystem::path& path) {
                              anim.width, anim.height,
                              img.ImageDesc.Left, img.ImageDesc.Top,
                              img.ImageDesc.Width, img.ImageDesc.Height,
-                             bg);
+                             {0,0,0,0});
         } else if (disposal == 3) {
             canvas.swap(before);
         }
@@ -918,15 +918,13 @@ int main(int argc, char *argv[]) {
         // const auto now = std::chrono::steady_clock::now();
         // if (now >= next_frame_time) {
         std::this_thread::sleep_for(std::chrono::milliseconds(anim.frames[frame_index].delay_ms));
-            const GifFrame& f = anim.frames[frame_index];
             w.upload_rgba_frame_to_gif_image(
-                f.rgba.data(),
-                f.rgba.size(),
+                anim.frames[frame_index].rgba.data(),
+                anim.frames[frame_index].rgba.size(),
                 anim.width,
                 anim.height,
                 frame_index == 0
             );
-
             frame_index = (frame_index + 1) % anim.frames.size();
             // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
         // }

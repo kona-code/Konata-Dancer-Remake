@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <set>
@@ -39,6 +40,24 @@ struct DragState {
     int press_window_y = 0;
 };
 
+struct MenuItem {
+    std::string label;
+    std::function<void()> action;
+};
+
+struct ContextMenu {
+    bool visible = false;
+    double x = 0.0;
+    double y = 0.0;
+    int hovered = -1;
+    std::vector<MenuItem> items;
+};
+
+static constexpr double kItemH = 24.0;
+static constexpr double kMenuW  = 180.0;
+static constexpr double kPad     = 6.0;
+
+static ContextMenu g_menu;
 static DragState g_drag;
 
 // helpers
@@ -450,34 +469,113 @@ void konanix::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     vkBindBufferMemory(g_device,buffer,buffer_memory,0);
 }
 
+// void draw_context_menu() {
+//     if (!g_menu.visible) return;
+
+//     double w = kMenuW;
+//     double h = kItemH * g_menu.items.size();
+
+//     draw_filled_rect(g_menu.x, g_menu.y, w, h, /*bg*/);
+//     draw_outline_rect(g_menu.x, g_menu.y, w, h, /*border*/);
+
+//     for (int i = 0; i < static_cast<int>(g_menu.items.size()); ++i) {
+//         double item_y = g_menu.y + i * kItemH;
+
+//         if (i == g_menu.hovered) {
+//             draw_filled_rect(g_menu.x, item_y, w, kItemH, /*hover*/);
+//         }
+
+//         draw_text(g_menu.x + kPad, item_y + 6, g_menu.items[i].label);
+//     }
+// }
+
+static void open_context_menu(GLFWwindow* window, double x, double y) {
+    g_menu.visible = true;
+    g_menu.x = x;
+    g_menu.y = y;
+    g_menu.hovered = -1;
+}
+
+static void close_context_menu() {
+    g_menu.visible = false;
+    g_menu.hovered = -1;
+}
+
+static int menu_item_at(double mx, double my) {
+    if (!g_menu.visible) return -1;
+
+    const double left   = g_menu.x;
+    const double top    = g_menu.y;
+    const double right   = left + kMenuW;
+    const double bottom  = top + kItemH * g_menu.items.size();
+
+    if (mx < left || mx > right || my < top || my > bottom)
+        return -1;
+
+    return static_cast<int>((my - top) / kItemH);
+}
+
+// static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+
+
+//     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+//         open_context_menu(window, cx, cy);
+//         return;
+//     }
+
+//     if (!g_menu.visible)
+//         return;
+
+//     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+//         int idx = menu_item_at(cx, cy);
+//         if (idx >= 0 && idx < static_cast<int>(g_menu.items.size())) {
+//             auto action = g_menu.items[idx].action;
+//             close_context_menu();
+//             if (action) action();
+//         } else {
+//             close_context_menu();
+//         }
+//     }
+
+//     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+//         close_context_menu();
+//     }
+// }
+
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
-    if (button != GLFW_MOUSE_BUTTON_LEFT)
-        return;
-
-    if (action == GLFW_PRESS) {
-        double cx, cy;
-        glfwGetCursorPos(window, &cx, &cy);
-
-        g_drag.dragging = true;
-        g_drag.press_cursor_x = cx;
-        g_drag.press_cursor_y = cy;
-        glfwGetWindowPos(window, &g_drag.press_window_x, &g_drag.press_window_y);
+    double cx, cy;
+    glfwGetCursorPos(window,&cx,&cy);
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+        int idx = menu_item_at(cx, cy);
+        if (idx >= 0 && idx < static_cast<int>(g_menu.items.size())) {
+            auto action = g_menu.items[idx].action;
+            close_context_menu();
+            if (action) action();
+        } else {
+            if (g_menu.visible) close_context_menu();
+            g_drag.dragging = true;
+            g_drag.press_cursor_x = cx;
+            g_drag.press_cursor_y = cy;
+            glfwGetWindowPos(window,&g_drag.press_window_x,&g_drag.press_window_y);
+        }
     } else if (action == GLFW_RELEASE) {
         g_drag.dragging = false;
-    }
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+        if (g_menu.visible) close_context_menu();
+        open_context_menu(window,cx,cy);
+
+    } else return;
 }
 
 static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
-    if (!g_drag.dragging)
-        return;
+    if (g_drag.dragging)
+        glfwSetWindowPos(window, 
+            g_drag.press_window_x + static_cast<int>(xpos - g_drag.press_cursor_x), 
+            g_drag.press_window_y + static_cast<int>(ypos - g_drag.press_cursor_y));
+    if (g_menu.visible)
+        g_menu.hovered = menu_item_at(xpos, ypos);
 
-    const int new_x = g_drag.press_window_x + static_cast<int>(xpos - g_drag.press_cursor_x);
-    const int new_y = g_drag.press_window_y + static_cast<int>(ypos - g_drag.press_cursor_y);
-
-    glfwSetWindowPos(window, new_x, new_y);
 }
-
-
 
 
 konanix::konanix(const uint32_t &w, const uint32_t &h)
