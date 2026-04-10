@@ -240,10 +240,10 @@ static VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR &capabilitie
 }
 
 static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR> available_formats) {
-    // for (const VkSurfaceFormatKHR& availableFormat : available_formats) {
-    //     if (availableFormat.format==VK_FORMAT_B8G8R8_SRGB&&availableFormat.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return availableFormat;
-    // }
-    // return available_formats[0];
+    for (const VkSurfaceFormatKHR& availableFormat : available_formats) {
+        if (availableFormat.format==VK_FORMAT_B8G8R8_SRGB&&availableFormat.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return availableFormat;
+    }
+    return available_formats[0];
     // for (const VkSurfaceFormatKHR& f : available_formats) {
     //     if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
     //          f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
@@ -268,16 +268,16 @@ static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurface
     // }
     // return available_formats[0];
 
-    for (const VkSurfaceFormatKHR &f : available_formats) {
-        if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
-             f.format == VK_FORMAT_R8G8B8A8_SRGB ||
-             f.format == VK_FORMAT_B8G8R8A8_UNORM ||
-             f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
-            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            return f;
-        }
-    }
-    return available_formats[0];
+    // for (const VkSurfaceFormatKHR &f : available_formats) {
+    //     if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
+    //          f.format == VK_FORMAT_R8G8B8A8_SRGB ||
+    //          f.format == VK_FORMAT_B8G8R8A8_UNORM ||
+    //          f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
+    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+    //         return f;
+    //     }
+    // }
+    // return available_formats[0];
 
 }
 
@@ -510,7 +510,6 @@ konanix::konanix(const uint32_t &w, const uint32_t &h)
         throw std::runtime_error("failed to create a glfw window");
     }
     glfwSetWindowSize(g_window,width,height);
-    glfwSetWindowAttrib(g_window, GLFW_DECORATED, GLFW_FALSE);
     glfwSetMouseButtonCallback(g_window, mouse_button_callback);
     glfwSetCursorPosCallback(g_window, cursor_pos_callback);
 }

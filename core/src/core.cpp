@@ -133,10 +133,15 @@ static void clear_rect_to_bg(std::vector<uint8_t>& canvas,
             const int dx = left + x;
             if (dx < 0 || dx >= canvas_w) continue;
             const size_t p = static_cast<size_t>(dy * canvas_w + dx) * 4;
-            canvas[p + 0] = bg[0];
-            canvas[p + 1] = bg[1];
-            canvas[p + 2] = bg[2];
-            canvas[p + 3] = bg[3];
+            // canvas[p + 0] = bg[0];
+            // canvas[p + 1] = bg[1];
+            // canvas[p + 2] = bg[2];
+            // canvas[p + 3] = bg[3];
+            canvas[p + 0] = 0;
+            canvas[p + 1] = 0;
+            canvas[p + 2] = 0;
+            canvas[p + 3] = 0;
+
         }
     }
 }
