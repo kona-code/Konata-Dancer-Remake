@@ -45,7 +45,7 @@ target_link_libraries(konacode
   PRIVATE
     Vulkan::Vulkan
     glfw
-    CURL::libcurl
+    # CURL::libcurl
     Threads::Threads
     GIF::GIF
 )
