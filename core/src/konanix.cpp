@@ -17,6 +17,9 @@
 
 #include "logger.h"
 
+#include "frag.c"
+#include "vert.c"
+
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
@@ -324,7 +327,7 @@ static std::vector<char> read_file(const std::string& file) {
     return buffer;
 }
 
-static VkShaderModule create_shader_module(const VkDevice device, const std::vector<char> &code) {
+static VkShaderModule create_shader_module(const VkDevice device, const std::vector<char> &code) { // not used anymore
     const VkShaderModuleCreateInfo shader_info {
         VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         VK_NULL_HANDLE,
@@ -341,84 +344,6 @@ static VkShaderModule create_shader_module(const VkDevice device, const std::vec
 
     return s_module;
 }
-
-
-// VkCommandBuffer konanix::begin_single_time_commands() { // moved to core
-//     const VkCommandBufferAllocateInfo alloc_info {
-//         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-//         VK_NULL_HANDLE,
-
-//         g_commandpool,
-//         VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-//         1
-//     };
-    
-//     VkCommandBuffer command_buffer;
-//     vkAllocateCommandBuffers(g_device, &alloc_info, &command_buffer);
-    
-//     VkCommandBufferBeginInfo begin_info{
-//     VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-//     VK_NULL_HANDLE,
-//     VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-//     VK_NULL_HANDLE
-//     };
-
-//     vkBeginCommandBuffer(command_buffer, &begin_info);
-//     return command_buffer;
-// }
-
-// void konanix::end_single_time_commands(VkCommandBuffer buffer) { // moved to core
-//     vkEndCommandBuffer(buffer);
-    
-//     const VkSubmitInfo submitInfo {
-//         VK_STRUCTURE_TYPE_SUBMIT_INFO,
-//         VK_NULL_HANDLE,
-
-//         0,
-//         VK_NULL_HANDLE,
-//         0,
-
-//         1,
-//         &buffer,
-
-//         0,
-//         VK_NULL_HANDLE
-//     };
-
-//     vkQueueSubmit(g_graphicsqueue, 1, &submitInfo, VK_NULL_HANDLE);
-//     vkQueueWaitIdle(g_graphicsqueue);
-//     vkFreeCommandBuffers(g_device, g_commandpool, 1, &buffer);
-// }
-
-// void konanix::copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height) { // moved to core
-//     VkCommandBuffer command_buffer = begin_single_time_commands();
-
-//     const VkBufferImageCopy region {
-//         0,
-//         0,
-//         0,
-//         {
-//             VK_IMAGE_ASPECT_COLOR_BIT,
-//             0,
-//             0,
-//             1
-//         },
-//         {
-//             0,
-//             0,
-//             0,
-//         },
-//         {
-//             width,
-//             height,
-//             1
-//         }
-//     };
-
-//     vkCmdCopyBufferToImage(command_buffer,buffer,image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
-
-//     end_single_time_commands(command_buffer);
-// }
 
 uint32_t konanix::find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties mem_properties;
@@ -514,33 +439,6 @@ static int menu_item_at(double mx, double my) {
 
     return static_cast<int>((my - top) / kItemH);
 }
-
-// static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
-
-
-//     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
-//         open_context_menu(window, cx, cy);
-//         return;
-//     }
-
-//     if (!g_menu.visible)
-//         return;
-
-//     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-//         int idx = menu_item_at(cx, cy);
-//         if (idx >= 0 && idx < static_cast<int>(g_menu.items.size())) {
-//             auto action = g_menu.items[idx].action;
-//             close_context_menu();
-//             if (action) action();
-//         } else {
-//             close_context_menu();
-//         }
-//     }
-
-//     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
-//         close_context_menu();
-//     }
-// }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
     double cx, cy;
@@ -994,19 +892,47 @@ void konanix::create_image_views() {
 void konanix::create_graphics_pipeline() {
     logger::log("<Vulkan> Creating the graphics pipeline...",logger::dbg);
 
-    VkShaderModule v_shadermodule = create_shader_module(g_device,read_file("shaders/vert.spv"));
-    VkShaderModule f_shadermodule = create_shader_module(g_device,read_file("shaders/frag.spv"));
+    // VkShaderModule v_shadermodule = create_shader_module(g_device,read_file("shaders/vert.spv"));
+    // VkShaderModule f_shadermodule = create_shader_module(g_device,read_file("shaders/frag.spv"));
+
+    const VkShaderModuleCreateInfo vertex_info {
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        vert_spv_len,
+        reinterpret_cast<const uint32_t*>(vert_spv)
+    };
+
+    VkShaderModule vertex_shader;
+    if (vkCreateShaderModule(g_device, &vertex_info, nullptr, &vertex_shader)) {
+        logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
+        throw std::runtime_error("failed to create a shader module");
+    }
+
+    const VkShaderModuleCreateInfo fragment_info {
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        frag_spv_len,
+        reinterpret_cast<const uint32_t*>(frag_spv)
+    };
+
+    VkShaderModule fragment_shader;
+    if (vkCreateShaderModule(g_device, &fragment_info, nullptr, &fragment_shader)) {
+        logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
+        throw std::runtime_error("failed to create a shader module");
+    }
 
         VkPipelineShaderStageCreateInfo v_shader_info{};
         v_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         v_shader_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
-        v_shader_info.module = v_shadermodule;
+        v_shader_info.module = vertex_shader;
         v_shader_info.pName = "main";
 
         VkPipelineShaderStageCreateInfo f_shader_info{};
         f_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         f_shader_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        f_shader_info.module = f_shadermodule;
+        f_shader_info.module = fragment_shader;
         f_shader_info.pName = "main";
 
 
@@ -1185,8 +1111,10 @@ void konanix::create_graphics_pipeline() {
     }
 
     logger::log("<Vulkan> Graphics pipeline created! Cleaning shader data...",logger::dbg);
-    vkDestroyShaderModule(g_device,v_shadermodule,nullptr);
-    vkDestroyShaderModule(g_device,f_shadermodule,nullptr);
+    // vkDestroyShaderModule(g_device,v_shadermodule,nullptr);
+    // vkDestroyShaderModule(g_device,f_shadermodule,nullptr);
+    vkDestroyShaderModule(g_device,fragment_shader,nullptr);
+    vkDestroyShaderModule(g_device,vertex_shader,nullptr);
 
     logger::log("<Vulkan> Graphics pipeline created!",logger::dbg);
 }
@@ -1438,61 +1366,6 @@ void konanix::create_sync_objects() {
         }
     } 
 }
-
-// moved to core
-// void konanix::draw_frame() {
-//     vkWaitForFences(g_device,1,&g_in_flight_fence,VK_TRUE,UINT64_MAX);
-//     vkResetFences(g_device,1,&g_in_flight_fence);
-
-//     uint32_t image_index;
-//     vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphore, VK_NULL_HANDLE, &image_index);
-
-//     vkResetCommandBuffer(g_commandbuffer,0);
-//     record_command_buffer(g_commandbuffer, image_index);
-    
-//     const VkSemaphore wait_semaphores[] = {g_image_available_semaphore};
-//     const VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-//     const VkSemaphore signal_semaphores[] = {g_render_finished_semaphore};
-
-//     const VkSubmitInfo submit_info {
-//         VK_STRUCTURE_TYPE_SUBMIT_INFO,
-//         VK_NULL_HANDLE,
-
-//         1,
-//         wait_semaphores,
-//         wait_stages,
-
-//         1,
-//         &g_commandbuffer,
-
-//         1,
-//         signal_semaphores
-//     };
-//     if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fence) != VK_SUCCESS) {
-//         logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
-//         throw std::runtime_error("failed to submit draw command buffer");
-//     } 
-    
-
-//     const VkSwapchainKHR swapchains[] = {g_swapchain};
-
-//     const VkPresentInfoKHR present_info {
-//         VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-//         VK_NULL_HANDLE,
-
-//         1,
-//         signal_semaphores,
-
-//         1,
-//         swapchains,
-
-//         &image_index,
-
-//         nullptr
-//     };
-//     vkQueuePresentKHR(g_presentqueue,&present_info);
-
-// };
 
 void konanix::recreate_swap_chain() {
     logger::log("Recreating swap chain...",logger::dbg);

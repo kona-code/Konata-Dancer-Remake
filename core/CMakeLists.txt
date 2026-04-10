@@ -62,9 +62,9 @@ endif()
 # ---------------------------------------------------------------------------
 # copy shaders
 # ---------------------------------------------------------------------------
-add_custom_command(TARGET konacode POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADER_ROOT}" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders"
-
-  VERBATIM
-)
+#add_custom_command(TARGET konacode POST_BUILD
+#  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders"
+#  COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADER_ROOT}" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders"
+#
+#  VERBATIM
+#) # now converted to C and compiled
