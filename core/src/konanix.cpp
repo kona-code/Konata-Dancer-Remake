@@ -35,6 +35,83 @@ struct QueueFamilyIndices {
     }
 };
 
+void konanix::Overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    if (x < 0 || y < 0 || x >= w || y >= h) return;
+    size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+    float sa = a / 255.0f;
+    float da = rgba[i + 3] / 255.0f;
+    float outA = sa + da * (1.0f - sa);
+    if (outA <= 0.0f) {
+        rgba[i + 0] = rgba[i + 1] = rgba[i + 2] = rgba[i + 3] = 0;
+        return;
+    }
+    auto blend = [&](uint8_t src, uint8_t dst) -> uint8_t {
+        float s = src / 255.0f;
+        float d = dst / 255.0f;
+        float out = (s * sa + d * da * (1.0f - sa)) / outA;
+        int v = int(out * 255.0f + 0.5f);
+        if (v < 0) v = 0;
+        if (v > 255) v = 255;
+        return (uint8_t)v;
+    };
+    rgba[i + 0] = blend(r, rgba[i + 0]);
+    rgba[i + 1] = blend(g, rgba[i + 1]);
+    rgba[i + 2] = blend(b, rgba[i + 2]);
+    rgba[i + 3] = (uint8_t)(outA * 255.0f + 0.5f);
+}
+
+void konanix::Overlay::rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    for (int yy = 0; yy < rh; ++yy) {
+        for (int xx = 0; xx < rw; ++xx) {
+            set_pixel(x + xx, y + yy, r, g, b, a);
+        }
+    }
+}
+
+void konanix::Overlay::stroke_rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    rect(x, y, rw, 1, r, g, b, a);
+    rect(x, y + rh - 1, rw, 1, r, g, b, a);
+    rect(x, y, 1, rh, r, g, b, a);
+    rect(x + rw - 1, y, 1, rh, r, g, b, a);
+}
+
+// font map
+std::array<uint8_t, 7> glyph(char c) {
+    switch (c) {
+        case ' ': return {0,0,0,0,0,0,0};
+        case 'C': return {0b01110,0b10001,0b10000,0b10000,0b10000,0b10001,0b01110};
+        case 'E': return {0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b11111};
+        case 'I': return {0b11111,0b00100,0b00100,0b00100,0b00100,0b00100,0b11111};
+        case 'L': return {0b10000,0b10000,0b10000,0b10000,0b10000,0b10000,0b11111};
+        case 'N': return {0b10001,0b11001,0b10101,0b10011,0b10001,0b10001,0b10001};
+        case 'O': return {0b01110,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110};
+        case 'P': return {0b11110,0b10001,0b10001,0b11110,0b10000,0b10000,0b10000};
+        case 'S': return {0b01111,0b10000,0b10000,0b01110,0b00001,0b00001,0b11110};
+        case 'T': return {0b11111,0b00100,0b00100,0b00100,0b00100,0b00100,0b00100};
+        case 'X': return {0b10001,0b01010,0b00100,0b00100,0b00100,0b01010,0b10001};
+        default:  return {0b11111,0b10001,0b00010,0b00100,0b00100,0b00000,0b00100}; // ?
+    }
+}
+
+void konanix::Overlay::draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
+    c = (char)std::toupper((unsigned char)c);
+    auto g7 = glyph(c);
+    for (int row = 0; row < 7; ++row) {
+        for (int col = 0; col < 5; ++col) {
+            if (g7[row] & (1 << (4 - col))) {
+                rect(x + col * scale, y + row * scale, scale, scale, r, g, b, a);
+            }
+        }
+    }
+}
+void konanix::Overlay::draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
+    int cx = x;
+    for (char c : s) {
+        draw_char(cx, y, c, r, g, b, a, scale);
+        cx += 6 * scale; // 5 pixels + 1 pixel spacing
+    }
+}
+
 struct DragState {
     bool dragging = false;
     double press_cursor_x = 0.0;
@@ -394,25 +471,25 @@ void konanix::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     vkBindBufferMemory(g_device,buffer,buffer_memory,0);
 }
 
-// void draw_context_menu() {
-//     if (!g_menu.visible) return;
+static void draw_context_menu(konanix::Overlay &ov) {
+    if (!g_menu.visible) return;
 
-//     double w = kMenuW;
-//     double h = kItemH * g_menu.items.size();
+    int x = (int)g_menu.x;
+    int y = (int)g_menu.y;
+    int h = kItemH * (int)g_menu.items.size();
 
-//     draw_filled_rect(g_menu.x, g_menu.y, w, h, /*bg*/);
-//     draw_outline_rect(g_menu.x, g_menu.y, w, h, /*border*/);
+    ov.rect(x, y,kMenuW, h, 28, 28, 28, 230);
+    ov.stroke_rect(x, y, kMenuW, h, 90, 90, 90, 255);
 
-//     for (int i = 0; i < static_cast<int>(g_menu.items.size()); ++i) {
-//         double item_y = g_menu.y + i * kItemH;
+    for (int i = 0; i < (int)g_menu.items.size(); ++i) {
+        int iy = y + i * kItemH;
+        if (i == g_menu.hovered) {
+            ov.rect(x + 1, iy + 1, kMenuW - 2, kItemH - 2, 70, 70, 70, 255);
+        }
 
-//         if (i == g_menu.hovered) {
-//             draw_filled_rect(g_menu.x, item_y, w, kItemH, /*hover*/);
-//         }
-
-//         draw_text(g_menu.x + kPad, item_y + 6, g_menu.items[i].label);
-//     }
-// }
+        ov.draw_text(x + kPad, iy + 6, g_menu.items[i].label, 235, 235, 235, 255, 2);
+    }
+}
 
 static void open_context_menu(GLFWwindow* window, double x, double y) {
     g_menu.visible = true;
@@ -505,6 +582,10 @@ konanix::konanix(const uint32_t &w, const uint32_t &h)
         glfwTerminate();
         throw std::runtime_error("failed to create a glfw window");
     }
+    g_menu.items = {
+        {"OPEN",[]{}},
+        {"CLOSE",[this]{glfwSetWindowShouldClose(g_window,GLFW_TRUE);}},
+    };
     glfwSetWindowSize(g_window,width,height);
     glfwSetMouseButtonCallback(g_window, mouse_button_callback);
     glfwSetCursorPosCallback(g_window, cursor_pos_callback);

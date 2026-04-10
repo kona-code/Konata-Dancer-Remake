@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <string>
 #include <vector>
 #include <vulkan/vulkan.h>
 #include <atomic>
@@ -19,27 +20,41 @@
 class konanix {
 public:
     GLFWwindow* g_window;
+    std::atomic<bool> running {true};
     void initialize();
     void render();
     void cleanup();
     void draw_frame();
     void create_descriptor_set();
-    std::atomic<bool> running {true};
+
     konanix(const uint32_t &width = 1280, const uint32_t &height = 640);
     ~konanix();
-
 
     void create_gif_image(uint32_t width, uint32_t height);
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &buffer_memory);
     void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload = false);
     void transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
     void copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+
+    struct Overlay {
+        int w = 0;
+        int h = 0;
+        uint8_t* rgba = nullptr;
+    
+        void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+        void rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+        void stroke_rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+        void draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
+        void draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
+    };
+    static void draw_context_menu(Overlay &overlay);
     VkSampler create_sampler();
     VkImageView create_image_view(VkImage image, VkFormat format);
     VkDevice get_device() const { return g_device; };
     uint32_t width, height;
     VkDeviceSize image_size;
     void* pxdata;
+    
 private:
     void create_instance();
     void create_device();
