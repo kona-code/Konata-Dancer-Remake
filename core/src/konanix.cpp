@@ -282,7 +282,7 @@ static VkPhysicalDevice pick_device(VkInstance instance, VkSurfaceKHR surface,co
     if (device_count == 0) {
         logger::log("No physical devices could be found!",logger::exc);
         logger::log("Check if your graphics card or integrated graphics support Vulkan!",logger::exc);
-        logger::log("Check if you have supported Vulkan drivers to run this program (VK_API_VERSION_1_4)!",logger::exc);
+        logger::log("Check if you have supported Vulkan drivers to run this program (VK_API_VERSION_1_0)!",logger::exc);
         return VK_NULL_HANDLE;
     }
 
@@ -555,8 +555,6 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
 
 konanix::konanix(const uint32_t &w, const uint32_t &h)
                 : width(std::move(w)), height(std::move(h)) {
-    // width = w;
-    // height = h;
     if (!glfwInit()) {
         logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
         throw std::runtime_error("failed to initialize glfw");
@@ -1383,7 +1381,7 @@ void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t imag
 
     vkCmdBindPipeline(commandbuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, g_graphics_pipeline);
 
-    VkViewport viewport{
+    const VkViewport viewport{
         0.0f, 0.0f,
         static_cast<float>(g_swapchain_extent.width),
         static_cast<float>(g_swapchain_extent.height),

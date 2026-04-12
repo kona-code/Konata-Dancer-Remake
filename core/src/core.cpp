@@ -51,6 +51,7 @@ struct MemoryGifReader {
 };
 
 std::filesystem::path path;
+konanix *g_konanix;
 
 // giflib helpers
 static std::vector<uint8_t> read_binary_file(const std::filesystem::path& p) {
@@ -744,28 +745,29 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
 
 void terminate_handler(int s) {
     logger::log("Caught signal "+std::to_string(s)+"! Terminating...");
-    konanix w;
+
     if (g_gif_sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(w.get_device(), g_gif_sampler, nullptr);
+        vkDestroySampler(g_konanix->get_device(), g_gif_sampler, nullptr);
         g_gif_sampler = VK_NULL_HANDLE;
     }
 
     if (g_gif_image_view != VK_NULL_HANDLE) {
-        vkDestroyImageView(w.get_device(), g_gif_image_view, nullptr);
+        vkDestroyImageView(g_konanix->get_device(), g_gif_image_view, nullptr);
         g_gif_image_view = VK_NULL_HANDLE;
     }
 
     if (g_gif_image != VK_NULL_HANDLE) {
-        vkDestroyImage(w.get_device(), g_gif_image, nullptr);
+        vkDestroyImage(g_konanix->get_device(), g_gif_image, nullptr);
         g_gif_image = VK_NULL_HANDLE;
     }
 
     if (g_gif_image_memory != VK_NULL_HANDLE) {
-        vkFreeMemory(w.get_device(), g_gif_image_memory, nullptr);
+        vkFreeMemory(g_konanix->get_device(), g_gif_image_memory, nullptr);
         g_gif_image_memory = VK_NULL_HANDLE;
     }
-    w.cleanup();
+    g_konanix->cleanup();
     logger::log("Terminated successfully!");
+    exit(0);
 }
 
 int main(int argc, char *argv[]) {
@@ -889,6 +891,7 @@ int main(int argc, char *argv[]) {
     logger::log("Creating window object...",logger::dbg);
 
     konanix w(iw,ih);
+    g_konanix = &w;
     w.image_size = iw*ih*4;
     try {
         w.initialize();
@@ -929,6 +932,9 @@ int main(int argc, char *argv[]) {
             frame_index = (frame_index + 1) % anim.frames.size();
             // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
         // }
+        // int wi,he;
+        // glfwGetWindowSize(w.g_window,&wi,&he);
+        // logger::log("GLFW window size: "+std::to_string(wi)+"x"+std::to_string(he));
         w.draw_frame();
         glfwPollEvents();
     }
@@ -956,7 +962,7 @@ int main(int argc, char *argv[]) {
 }
 
 void konanix::draw_frame() {
-    
+    // glfwSetWindowSize(g_window,width,height);
     vkWaitForFences(g_device,1,&g_in_flight_fences[current_frame],VK_TRUE,UINT64_MAX);
     // vkResetFences(g_device,1,&g_in_flight_fences[current_frame]);
 
