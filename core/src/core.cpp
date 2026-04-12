@@ -744,6 +744,7 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
 }
 
 void terminate_handler(int s) {
+    printf("\n");
     logger::log("Caught signal "+std::to_string(s)+"! Terminating...");
 
     if (g_gif_sampler != VK_NULL_HANDLE) {
