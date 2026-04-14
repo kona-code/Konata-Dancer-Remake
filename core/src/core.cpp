@@ -28,7 +28,7 @@
 
 #include <signal.h>
 
-#include "konata.c"
+#include "konata.bin"
 
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>

@@ -39,7 +39,20 @@ public:
     struct Overlay {
         int w = 0;
         int h = 0;
+        std::vector<uint8_t> storage;
         uint8_t* rgba = nullptr;
+    
+        void resize(int width, int height) {
+            w = width;
+            h = height;
+            storage.assign(size_t(w) * size_t(h) * 4, 0);
+            rgba = storage.data();
+        }
+    
+        void clear() {
+            if (!rgba) return;
+            std::fill(storage.begin(), storage.end(), 0);
+        }
     
         void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
         void rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
