@@ -28,7 +28,7 @@
 
 #include <signal.h>
 
-#include "konata.bin"
+#include "konata.c" // changing to bin had no effect
 
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
@@ -818,13 +818,14 @@ int main(int argc, char *argv[]) {
             "[0m[38;2;128;97;80m:[0m[38;2;128;98;82m:[0m[38;2;127;96;81m:[0m[38;2;125;93;78m:[0m[38;2;116;84;69m;[0m[38;2;110;79;64m,[0m[38;2;109;77;62m,[0m[38;2;105;75;62m,[0m[38;2;103;75;61m,[0m[38;2;104;75;62m,[0m[38;2;106;77;63m,[0m[38;2;105;76;64m,[0m[38;2;104;76;64m,[0m[38;2;95;69;58m,[0m[38;2;83;60;51m'[0m[38;2;88;64;54m'[0m[38;2;88;64;54m'[0m[38;2;88;64;54m'[0m[38;2;85;62;53m'[0m[38;2;65;90;130m;[0m[38;2;74;61;62m'[0m[38;2;87;64;56m'[0m[38;2;70;51;45m.[0m[38;2;74;54;48m.[0m[38;2;102;75;66m,[0m[38;2;102;75;66m,[0m[38;2;100;79;77m,[0m[38;2;89;95;120m;[0m[38;2;76;95;133m;[0m[38;2;83;141;225mo[0m[38;2;80;145;239mo[0m[38;2;71;123;201mc[0m[38;2;93;110;143m:[0m[38;2;173;172;180mk[0m[38;2;182;181;190mO[0m[38;2;207;221;244mX[0m[38;2;206;173;165mO[0m[38;2;253;197;170mK[0m[38;2;252;196;169mK[0m[38;2;251;195;167mK[0m[38;2;251;195;167mK[0m[38;2;251;199;173mK[0m[38;2;208;163;141mk[0m[38;2;63;57;57m.[0m[38;2;71;59;55m.[0m[38;2;182;124;103mo[0m[38;2;175;122;108mo[0m[38;2;96;107;143m:[0m[38;2;69;115;181m:[0m[38;2;73;113;172m:[0m[38;2;196;164;158mk[0m[38;2;253;197;170mK[0m[38;2;253;197;170mK[0m[38;2;252;196;169mK[0m[38;2;250;194;167mK[0m[38;2;248;192;164mK[0m[38;2;243;186;157m0[0m[38;2;236;178;149m0[0m[38;2;230;170;141mO[0m[38;2;169;126;106mo[0m[38;2;150;106;89mc[0m[38;2;187;128;104mo[0m[38;2;152;115;106ml[0m[38;2;177;175;185mk[0m[38;2;164;162;172mx[0m[38;2;111;125;163ml[0m[38;2;63;90;143m;[0m[38;2;66;110;175m:[0m[38;2;64;106;170m:[0m[38;2;73;83;121m,[0m[38;2;95;107;141m:[0m[38;2;75;96;140m;[0m[38;2;62;92;146m;[0m[38;2;74;96;140m;[0m[38;2;112;116;141mc[0m[38;2;147;141;158mo[0m[38;2;160;152;171mx[0m[38;2;160;152;171mx[0m[38;2;161;152;171mx[0m[38;2;31;29;32m [0m[38;2;22;22;22m [0m[38;2;1;1;1m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m[38;2;0;0;0m [0m\n"
             "\n\033[34m\033[1mCopyright (C) konacode | \033[0m\033[34mhttps://konacode.com/\033[0m\n");
 
-
+    bool resizable = false;
     if (argc>0) {
         bool log_to_file = false, debug = false;
         for (int i = 1; i < argc; i++) {
             const std::string arg = argv[i];
             if (arg == "-debug" || arg == "--debug" || arg == "-d") debug = true;
             else if (arg == "-log" || arg == "--log" || arg == "-l") log_to_file = true;
+            else if (arg == "-resizable" || arg == "--resizable" || arg == "-r") resizable = true;
             else if (arg == "-file" || arg == "--file" || arg == "-f") {
                 try {
                     path = std::string(argv[++i]);
@@ -891,7 +892,7 @@ int main(int argc, char *argv[]) {
     }
     logger::log("Creating window object...",logger::dbg);
 
-    konanix w(iw,ih);
+    konanix w(iw,ih,resizable);
     g_konanix = &w;
     w.image_size = iw*ih*4;
     try {
@@ -923,19 +924,40 @@ int main(int argc, char *argv[]) {
         // const auto now = std::chrono::steady_clock::now();
         // if (now >= next_frame_time) {
         std::this_thread::sleep_for(std::chrono::milliseconds(anim.frames[frame_index].delay_ms));
-            w.upload_rgba_frame_to_gif_image(
-                anim.frames[frame_index].rgba.data(),
-                anim.frames[frame_index].rgba.size(),
-                anim.width,
-                anim.height,
-                frame_index == 0
-            );
+            // w.upload_rgba_frame_to_gif_image(
+            //     anim.frames[frame_index].rgba.data(),
+            //     anim.frames[frame_index].rgba.size(),
+            //     anim.width,
+            //     anim.height,
+            //     frame_index == 0
+            // );
             frame_index = (frame_index + 1) % anim.frames.size();
             // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
         // }
-        // int wi,he;
-        // glfwGetWindowSize(w.g_window,&wi,&he);
-        // logger::log("GLFW window size: "+std::to_string(wi)+"x"+std::to_string(he));
+
+        glfwGetWindowSize(w.g_window, &ctx.w, &ctx.h);
+            
+        ctx.storage.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
+        ctx.rgba = ctx.storage.data();
+        ctx.clear();
+        std::vector<uint8_t> overlay_buffer;
+        overlay_buffer.resize(size_t(ctx.w) * size_t(ctx.h) * 4);
+        // memcpy(&overlay_buffer,
+        //             &anim.frames[frame_index].rgba,
+        //             std::min(overlay_buffer.size(), anim.frames[frame_index].rgba.size()));
+        overlay_buffer = anim.frames[frame_index].rgba;
+        ctx.rgba = overlay_buffer.data();
+
+        konanix::draw_context_menu(ctx);
+
+        w.upload_rgba_frame_to_gif_image(
+            ctx.rgba,
+            overlay_buffer.size(),
+            ctx.w,
+            ctx.h,
+            frame_index == 0
+        );
+
         w.draw_frame();
         glfwPollEvents();
     }

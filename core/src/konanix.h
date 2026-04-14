@@ -27,7 +27,7 @@ public:
     void draw_frame();
     void create_descriptor_set();
 
-    konanix(const uint32_t &width = 1280, const uint32_t &height = 640);
+    konanix(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &resizable = false);
     ~konanix();
 
     void create_gif_image(uint32_t width, uint32_t height);
@@ -41,13 +41,6 @@ public:
         int h = 0;
         std::vector<uint8_t> storage;
         uint8_t* rgba = nullptr;
-    
-        void resize(int width, int height) {
-            w = width;
-            h = height;
-            storage.assign(size_t(w) * size_t(h) * 4, 0);
-            rgba = storage.data();
-        }
     
         void clear() {
             if (!rgba) return;

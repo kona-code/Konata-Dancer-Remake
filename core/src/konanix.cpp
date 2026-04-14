@@ -471,7 +471,7 @@ void konanix::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     vkBindBufferMemory(g_device,buffer,buffer_memory,0);
 }
 
-static void draw_context_menu(konanix::Overlay &ov) {
+void konanix::draw_context_menu(konanix::Overlay &ov) {
     if (!g_menu.visible) return;
 
     int x = (int)g_menu.x;
@@ -553,7 +553,7 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
 }
 
 
-konanix::konanix(const uint32_t &w, const uint32_t &h)
+konanix::konanix(const uint32_t &w, const uint32_t &h, const bool& resizable)
                 : width(std::move(w)), height(std::move(h)) {
     if (!glfwInit()) {
         logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
@@ -572,7 +572,8 @@ konanix::konanix(const uint32_t &w, const uint32_t &h)
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
     glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    if (!resizable)
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     g_window = glfwCreateWindow(width,height, "Konata Dancer", nullptr,nullptr);
     if (!g_window) {
