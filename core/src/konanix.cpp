@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -20,6 +21,44 @@
 #include "frag.c"
 #include "vert.c"
 
+static GLFWwindow*                     g_window                        = nullptr;
+static VkInstance                      g_instance                      = nullptr;
+static VkSurfaceKHR                    g_surface                       = nullptr;
+
+static VkPhysicalDevice                g_physicaldevice                = nullptr;
+static VkDevice                        g_device                        = nullptr;
+static VkQueue                         g_graphicsqueue                 = nullptr;
+static VkQueue                         g_presentqueue                  = nullptr;
+
+static VkSwapchainKHR                  g_swapchain                     = nullptr;
+static std::vector<VkImage>            g_swapchain_images              {};
+static VkFormat                        g_swapchain_image_format        {};
+static VkExtent2D                      g_swapchain_extent              {};
+static std::vector<VkImageView>        g_swapchain_image_views         {};
+static std::vector<VkFramebuffer>      g_swapchain_framebuffers        {};
+
+static VkRenderPass                    g_renderpass                    = nullptr;
+static VkPipelineLayout                g_pipeline_layout               = nullptr;
+static VkPipeline                      g_graphics_pipeline             = nullptr;
+
+static VkCommandPool                   g_commandpool                   = nullptr;
+static std::vector<VkCommandBuffer>    g_commandbuffers                {};
+static VkDescriptorSet                 g_descriptor_set                = nullptr;
+static VkDescriptorSetLayout           g_descriptor_set_layout         = nullptr; 
+static VkDescriptorPool                g_descriptor_pool               = nullptr;
+
+static std::vector<VkSemaphore>        g_image_available_semaphores    {};
+static std::vector<VkSemaphore>        g_render_finished_semaphores    {};
+static std::vector<VkFence>            g_in_flight_fences              {};
+
+static uint32_t                        current_frame = 1;
+static int                             width, height;
+
+VkImage                                 g_gif_image                     = nullptr;
+VkDeviceMemory                          g_gif_image_memory              = nullptr;
+VkImageView                             g_gif_image_view                = nullptr;
+VkSampler                               g_gif_sampler                   = nullptr;
+
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
@@ -34,6 +73,8 @@ struct QueueFamilyIndices {
         return (graphicsFamily.has_value()&&presentFamily.has_value());
     }
 };
+
+GLFWwindow* konanix::get_window() { return g_window; }
 
 void konanix::Overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (x < 0 || y < 0 || x >= w || y >= h) return;
@@ -339,33 +380,33 @@ static VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR &capabilitie
 }
 
 static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR> available_formats) {
-    for (const VkSurfaceFormatKHR& availableFormat : available_formats) {
-        if (availableFormat.format==VK_FORMAT_B8G8R8_SRGB&&availableFormat.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return availableFormat;
-    }
-    return available_formats[0];
-    // for (const VkSurfaceFormatKHR& f : available_formats) {
-    //     if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
-    //          f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
-    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-    //         return f;
-    //     }
-    // }
-
-    // for (const VkSurfaceFormatKHR& f : available_formats) {
-    //     if ((f.format == VK_FORMAT_B8G8R8A8_UNORM ||
-    //          f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
-    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-    //         return f;
-    //     }
-    // }
-
-    // for (const VkSurfaceFormatKHR& f : available_formats) {
-    //     if (f.format == VK_FORMAT_B8G8R8_SRGB &&
-    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-    //         return f;
-    //     }
+    // for (const VkSurfaceFormatKHR& availableFormat : available_formats) {
+    //     if (availableFormat.format==VK_FORMAT_B8G8R8_SRGB&&availableFormat.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) return availableFormat;
     // }
     // return available_formats[0];
+    for (const VkSurfaceFormatKHR& f : available_formats) {
+        if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
+             f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
+            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return f;
+        }
+    }
+
+    for (const VkSurfaceFormatKHR& f : available_formats) {
+        if ((f.format == VK_FORMAT_B8G8R8A8_UNORM ||
+             f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
+            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return f;
+        }
+    }
+
+    for (const VkSurfaceFormatKHR& f : available_formats) {
+        if (f.format == VK_FORMAT_B8G8R8_SRGB &&
+            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return f;
+        }
+    }
+    return available_formats[0];
 
     // for (const VkSurfaceFormatKHR &f : available_formats) {
     //     if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
@@ -552,9 +593,11 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
 
 }
 
+void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &resizable) {
+    width = std::move(w);
+    height = std::move(h);
 
-konanix::konanix(const uint32_t &w, const uint32_t &h, const bool& resizable)
-                : width(std::move(w)), height(std::move(h)) {
+
     if (!glfwInit()) {
         logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
         throw std::runtime_error("failed to initialize glfw");
@@ -575,6 +618,7 @@ konanix::konanix(const uint32_t &w, const uint32_t &h, const bool& resizable)
     if (!resizable)
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
+    // logger::log("Creating window with dimensions: "+std::to_string(width)+"x"+std::to_string(height),logger::dbg);
     g_window = glfwCreateWindow(width,height, "Konata Dancer", nullptr,nullptr);
     if (!g_window) {
         logger::log("<Vulkan> Failed to create a GLFW window!",logger::exc);
@@ -583,18 +627,12 @@ konanix::konanix(const uint32_t &w, const uint32_t &h, const bool& resizable)
     }
     g_menu.items = {
         {"OPEN",[]{}},
-        {"CLOSE",[this]{glfwSetWindowShouldClose(g_window,GLFW_TRUE);}},
+        {"CLOSE",[]{glfwSetWindowShouldClose(g_window,GLFW_TRUE);}},
     };
     glfwSetWindowSize(g_window,width,height);
     glfwSetMouseButtonCallback(g_window, mouse_button_callback);
     glfwSetCursorPosCallback(g_window, cursor_pos_callback);
-}
-
-konanix::~konanix() {
-    cleanup();
-}
-
-void konanix::initialize() {
+    
     create_instance();
     {
         if (glfwCreateWindowSurface(g_instance, g_window, nullptr, &g_surface) != VK_SUCCESS) {
@@ -622,6 +660,29 @@ void konanix::initialize() {
 }
 
 void konanix::cleanup() {
+    if (g_device!=VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(g_device);
+    }
+
+    if (g_gif_sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(g_device, g_gif_sampler, nullptr);
+        g_gif_sampler = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image_view != VK_NULL_HANDLE) {
+        vkDestroyImageView(g_device, g_gif_image_view, nullptr);
+        g_gif_image_view = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image != VK_NULL_HANDLE) {
+        vkDestroyImage(g_device, g_gif_image, nullptr);
+        g_gif_image = VK_NULL_HANDLE;
+    }
+
+    if (g_gif_image_memory != VK_NULL_HANDLE) {
+        vkFreeMemory(g_device, g_gif_image_memory, nullptr);
+        g_gif_image_memory = VK_NULL_HANDLE;
+    }
 
     if (g_descriptor_set_layout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(g_device,g_descriptor_set_layout,nullptr);
@@ -655,10 +716,6 @@ void konanix::cleanup() {
     if (g_commandpool!=VK_NULL_HANDLE) {
         vkDestroyCommandPool(g_device,g_commandpool,nullptr);
         logger::log("<Vulkan> Command pool destroyed!",logger::dbg);
-    }
-
-    if (g_device!=VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(g_device);
     }
 
     for (VkFramebuffer fb : g_swapchain_framebuffers) {
@@ -1461,7 +1518,539 @@ void konanix::recreate_swap_chain() {
 
     create_swap_chain();
     create_image_views();
+    create_gif_image(width, height);
     create_framebuffers();
 
     logger::log("Swap chain recreated!",logger::dbg);
 }
+
+static uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties, VkPhysicalDevice device) {
+    VkPhysicalDeviceMemoryProperties mem_properties {};
+    vkGetPhysicalDeviceMemoryProperties(device,&mem_properties);
+
+    for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
+        if ((type_filter & (1u << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+    logger::log("Failed to find a suitable memory type!",logger::exc);
+    throw std::runtime_error("failed to find a suitable memory type");
+}
+
+void konanix::create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
+                            VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory) {
+    const VkImageCreateInfo image_info {
+        VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        VK_IMAGE_TYPE_2D,
+        format,
+        {width,height,1},
+        1,
+        1,
+        VK_SAMPLE_COUNT_1_BIT,
+        tiling,
+        usage,
+        VK_SHARING_MODE_EXCLUSIVE,
+        0,
+        nullptr,
+        VK_IMAGE_LAYOUT_UNDEFINED
+    };
+
+    if (vkCreateImage(g_device,&image_info,nullptr,&image) != VK_SUCCESS) {
+        logger::log("Failed to create image!",logger::exc);
+        throw std::runtime_error("failed to create image");
+    }
+    logger::log("Vulkan image created!",logger::dbg);
+    VkMemoryRequirements mem_requirements{};
+    vkGetImageMemoryRequirements(g_device, image, &mem_requirements);
+
+    const VkMemoryAllocateInfo alloc_info{
+        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        VK_NULL_HANDLE,
+        mem_requirements.size,
+        find_memory_type(mem_requirements.memoryTypeBits, properties)
+    };
+
+    if (vkAllocateMemory(g_device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
+        vkDestroyImage(g_device,image,nullptr);
+        image = VK_NULL_HANDLE;
+        logger::log("Failed to allocate image memory!",logger::exc);
+        throw std::runtime_error("failed to allocate image memory");
+    }
+    if (vkBindImageMemory(g_device, image, image_memory, 0) != VK_SUCCESS) {
+        vkFreeMemory(g_device, image_memory, nullptr);
+        vkDestroyImage(g_device, image, nullptr);
+        image = VK_NULL_HANDLE;
+        image_memory = VK_NULL_HANDLE;
+        logger::log("Failed to bind image memory!",logger::exc);
+        throw std::runtime_error("failed to bind image memory");
+    }
+    logger::log("Allocated memory for Vulkan image!",logger::dbg);
+}
+
+VkImageView konanix::create_image_view(VkImage image, VkFormat format) {
+    const VkImageViewCreateInfo view_info {
+        VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        image,
+        VK_IMAGE_VIEW_TYPE_2D,
+        format,
+        {
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY
+        },
+        {
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0,
+            1,
+            0,
+            1
+        }
+    };
+
+    VkImageView image_view = VK_NULL_HANDLE;
+    if (vkCreateImageView(g_device,&view_info,nullptr,&image_view) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create image view");
+    } 
+
+    return image_view;
+}
+
+VkSampler konanix::create_sampler() {
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(g_physicaldevice,&properties);
+
+    const VkSamplerCreateInfo sampler_info {
+        VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        VK_FILTER_LINEAR,
+        VK_FILTER_LINEAR,
+        VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        0.0f,
+        VK_FALSE,
+        1.0f,
+        VK_FALSE,
+        VK_COMPARE_OP_ALWAYS,
+        0.0f,
+        0.0f,
+        // VK_BORDER_COLOR_INT_TRANSPARENT_BLACK,
+        VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        VK_FALSE
+    };
+
+    VkSampler sampler = VK_NULL_HANDLE;
+    if (vkCreateSampler(g_device,&sampler_info,nullptr,&sampler) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create sampler");
+    }
+    return sampler;
+}
+
+void konanix::create_descriptor_pool() {
+    std::array<VkDescriptorPoolSize, 1> pool_sizes{{
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 }
+    }};
+
+    VkDescriptorPoolCreateInfo pool_info{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        nullptr,
+        0,
+        4,
+        static_cast<uint32_t>(pool_sizes.size()),
+        pool_sizes.data()
+    };
+
+    if (vkCreateDescriptorPool(g_device, &pool_info, nullptr, &g_descriptor_pool) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create descriptor pool");
+    }
+}
+
+void konanix::create_descriptor_set() {
+    VkDescriptorSetLayout layouts[] = { g_descriptor_set_layout };
+
+    VkDescriptorSetAllocateInfo alloc_info{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        nullptr,
+        g_descriptor_pool,
+        1,
+        layouts
+    };
+
+    VkResult res = vkAllocateDescriptorSets(g_device, &alloc_info, &g_descriptor_set);
+    if (res != VK_SUCCESS) {
+        throw std::runtime_error("vkAllocateDescriptorSets failed with code " + std::to_string((int)res));
+    }
+
+    VkDescriptorImageInfo image_info{
+        g_gif_sampler,
+        g_gif_image_view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkWriteDescriptorSet write{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        nullptr,
+        g_descriptor_set,
+        0,
+        0,
+        1,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        &image_info,
+        nullptr,
+        nullptr
+    };
+
+    vkUpdateDescriptorSets(g_device, 1, &write, 0, nullptr);
+}
+
+void konanix::create_descriptor_set_layout() {
+    constexpr VkDescriptorSetLayoutBinding gif_binding {
+        0,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+
+    const VkDescriptorSetLayoutCreateInfo layout_info {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        1,
+        &gif_binding
+    };
+
+    if (vkCreateDescriptorSetLayout(g_device,&layout_info,nullptr,&g_descriptor_set_layout) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create descriptor set");
+    }
+}
+
+void konanix::create_gif_image(uint32_t width, uint32_t height) {
+    const static SwapChainSupportDetails swap_chain_support = query_swap_chain_support(g_physicaldevice, g_surface);
+    static VkFormat format;
+    for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
+        if ((f.format == VK_FORMAT_R8G8B8A8_SRGB ||
+             f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
+            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            format = VK_FORMAT_R8G8B8A8_SRGB;
+        }
+    }
+
+    if (!format)
+        for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
+            if ((f.format == VK_FORMAT_B8G8R8A8_UNORM ||
+                 f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
+                f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                format = VK_FORMAT_B8G8R8A8_UNORM;
+            }
+        }
+
+    if (!format)
+        for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
+            if (f.format == VK_FORMAT_B8G8R8_SRGB &&
+                f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                format = VK_FORMAT_B8G8R8_SRGB;
+            }
+        }
+        
+    create_image(width,height,format,
+    VK_IMAGE_TILING_OPTIMAL,
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    g_gif_image,g_gif_image_memory);
+
+    g_gif_image_view = create_image_view(g_gif_image, format);
+    g_gif_sampler = create_sampler();
+}
+
+static std::vector<uint8_t> read_binary_file(const std::string& path) {
+    logger::log("Parsing \""+path+"\"...",logger::dbg);
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        logger::log("Unable to open \""+path+"\"!",logger::exc);
+        throw std::runtime_error("failed to open file: " + path);
+    }
+
+    const std::streamsize size = file.tellg();
+    if (size <= 0) {
+        logger::log("File \""+path+"\" is empty!",logger::exc);
+        throw std::runtime_error("empty file: " + path);
+    }
+
+    std::vector<uint8_t> data(static_cast<size_t>(size));
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char*>(data.data()), size)) {
+        logger::log("Unable to read \""+path+"\"!",logger::exc);
+        throw std::runtime_error("failed to read file: " + path);
+    }
+    logger::log("Read \""+path+"\"!",logger::dbg);
+    return data;
+}
+
+VkCommandBuffer konanix::begin_single_time_commands() {
+    VkCommandBufferAllocateInfo alloc_info{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        nullptr,
+        g_commandpool,
+        VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        1
+    };
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(g_device, &alloc_info, &cmd) != VK_SUCCESS) {
+        logger::log("Failed to allocate transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to allocate transient command buffer");
+    }
+
+    VkCommandBufferBeginInfo begin_info{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        nullptr,
+        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        nullptr
+    };
+
+    if (vkBeginCommandBuffer(cmd, &begin_info) != VK_SUCCESS) {
+        vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+        logger::log("Failed to begin transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to begin transient command buffer");
+    }
+
+    return cmd;
+}
+
+void konanix::end_single_time_commands(VkCommandBuffer cmd) {
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+        logger::log("Failed to end transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to end transient command buffer");
+    }
+
+    VkSubmitInfo submit_info{
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        nullptr,
+        0, nullptr, nullptr,
+        1, &cmd,
+        0, nullptr
+    };
+
+    if (vkQueueSubmit(g_graphicsqueue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS) {
+        vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+        logger::log("Failed to submit transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to submit transient command buffer");
+    }
+
+    vkQueueWaitIdle(g_graphicsqueue);
+    vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+}
+
+void konanix::transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
+    VkCommandBuffer cmd = begin_single_time_commands();
+
+    VkImageMemoryBarrier barrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        nullptr,
+        0, 0,
+        old_layout,
+        new_layout,
+        VK_QUEUE_FAMILY_IGNORED,
+        VK_QUEUE_FAMILY_IGNORED,
+        image,
+        {
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0, 1,
+            0, 1
+        }
+    };
+
+    if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+        new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+               new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+               new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    } else {
+        vkFreeCommandBuffers(g_device, g_commandpool, 1, &cmd);
+        logger::log("Unsupported image layout transition!",logger::exc);
+        throw std::runtime_error("unsupported image layout transition");
+    }
+
+    vkCmdPipelineBarrier(
+        cmd,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+
+    end_single_time_commands(cmd);
+}
+
+void konanix::copy_buffer_to_image(
+    VkBuffer buffer,
+    VkImage image,
+    uint32_t width,
+    uint32_t height
+) {
+    VkCommandBuffer cmd = begin_single_time_commands();
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {width, height, 1};
+
+    vkCmdCopyBufferToImage(
+        cmd,
+        buffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &region
+    );
+
+    end_single_time_commands(cmd);
+}
+
+void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload) {
+    VkBuffer staging_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+
+    create_buffer(
+        static_cast<VkDeviceSize>(pixel_bytes),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        staging_buffer,
+        staging_memory
+    );
+    // logger::log("Created buffer for GIF frame",logger::dbg);
+
+    void* mapped = nullptr;
+    if (vkMapMemory(g_device, staging_memory, 0, pixel_bytes, 0, &mapped) != VK_SUCCESS) {
+        vkDestroyBuffer(g_device, staging_buffer, nullptr);
+        vkFreeMemory(g_device, staging_memory, nullptr);
+        logger::log("Failed to map staging memory!",logger::exc);
+        throw std::runtime_error("failed to map staging memory");
+    }
+
+    memcpy(mapped, rgba_pixels, pixel_bytes);
+    vkUnmapMemory(g_device, staging_memory);
+    // logger::log("Moved GIF pixel data to \"pixel_bytes\"!",logger::dbg);
+
+    const VkImageLayout from_layout = first_upload
+        ? VK_IMAGE_LAYOUT_UNDEFINED
+        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    transition_image_layout(
+        g_gif_image,
+        from_layout,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+
+    copy_buffer_to_image(
+        staging_buffer,
+        g_gif_image,
+        width,
+        height
+    );
+    // logger::log("Successfully copied buffer to image!",logger::dbg);
+
+    transition_image_layout(
+        g_gif_image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    vkDestroyBuffer(g_device, staging_buffer, nullptr);
+    vkFreeMemory(g_device, staging_memory, nullptr);
+    // logger::log("Freed up unneeded memory!",logger::dbg);
+}
+
+void konanix::draw_frame() {
+    // glfwSetWindowSize(g_window,width,height);
+    vkWaitForFences(g_device,1,&g_in_flight_fences[current_frame],VK_TRUE,UINT64_MAX);
+    // vkResetFences(g_device,1,&g_in_flight_fences[current_frame]);
+
+    glfwGetWindowSize(g_window,&width,&height);
+    uint32_t image_index;
+    // vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+    VkResult result = vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreate_swap_chain();
+        return;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        logger::log("<Vulkan> Failed to acquire swap chain image!",logger::exc);
+        throw std::runtime_error("failed to acquire swap chain image");
+    }    
+    
+    vkResetFences(g_device,1,&g_in_flight_fences[current_frame]);
+
+    vkResetCommandBuffer(g_commandbuffers[current_frame],0);
+    record_command_buffer(g_commandbuffers[current_frame], image_index);
+    
+    const VkSemaphore wait_semaphores[] = {g_image_available_semaphores[current_frame]};
+    const VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    const VkSemaphore signal_semaphores[] = {g_render_finished_semaphores[current_frame]};
+
+    const VkSubmitInfo submit_info {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        VK_NULL_HANDLE,
+
+        1,
+        wait_semaphores,
+        wait_stages,
+
+        1,
+        &g_commandbuffers[current_frame],
+
+        1,
+        signal_semaphores
+    };
+    if (vkQueueSubmit(g_graphicsqueue,1,&submit_info,g_in_flight_fences[current_frame]) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
+        throw std::runtime_error("failed to submit draw command buffer");
+    } 
+    
+
+    const VkSwapchainKHR swapchains[] = {g_swapchain};
+
+    const VkPresentInfoKHR present_info {
+        VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        VK_NULL_HANDLE,
+
+        1,
+        signal_semaphores,
+
+        1,
+        swapchains,
+
+        &image_index,
+
+        nullptr
+    };
+    vkQueuePresentKHR(g_presentqueue,&present_info);
+    current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+};

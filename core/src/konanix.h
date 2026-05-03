@@ -17,18 +17,13 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-class konanix {
-public:
-    GLFWwindow* g_window;
-    std::atomic<bool> running {true};
-    void initialize();
+namespace konanix {
+    inline std::atomic<bool> running {true};
+    void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &resizable = false);
     void render();
     void cleanup();
     void draw_frame();
     void create_descriptor_set();
-
-    konanix(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &resizable = false);
-    ~konanix();
 
     void create_gif_image(uint32_t width, uint32_t height);
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &buffer_memory);
@@ -53,15 +48,12 @@ public:
         void draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
         void draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
     };
-    static void draw_context_menu(Overlay &overlay);
+    void draw_context_menu(Overlay &overlay);
     VkSampler create_sampler();
     VkImageView create_image_view(VkImage image, VkFormat format);
-    VkDevice get_device() const { return g_device; };
-    uint32_t width, height;
-    VkDeviceSize image_size;
-    void* pxdata;
+    inline VkDeviceSize image_size;
+    inline void* pxdata;
     
-private:
     void create_instance();
     void create_device();
     void create_surface();
@@ -89,39 +81,6 @@ private:
 
     constexpr static short version[3] = {1, 0, 0};
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
-protected:
-    VkInstance g_instance;
-    VkSurfaceKHR g_surface;
 
-    VkPhysicalDevice g_physicaldevice;
-    VkDevice g_device;
-    VkQueue g_graphicsqueue;
-    VkQueue g_presentqueue;
-
-    VkSwapchainKHR g_swapchain;
-    std::vector<VkImage> g_swapchain_images;
-    VkFormat g_swapchain_image_format;
-    VkExtent2D g_swapchain_extent;
-    std::vector<VkImageView> g_swapchain_image_views;
-    std::vector<VkFramebuffer> g_swapchain_framebuffers;
-
-    VkRenderPass g_renderpass;
-    VkPipelineLayout g_pipeline_layout;
-    VkPipeline g_graphics_pipeline;
-
-    VkCommandPool g_commandpool;
-    std::vector<VkCommandBuffer> g_commandbuffers;
-
-    // VkSemaphore g_image_available_semaphore;
-    // VkSemaphore g_render_finished_semaphore;
-    // VkFence g_in_flight_fence;
-    std::vector<VkSemaphore> g_image_available_semaphores;
-    std::vector<VkSemaphore> g_render_finished_semaphores;
-    std::vector<VkFence> g_in_flight_fences;
-
-    VkDescriptorSet g_descriptor_set;
-    VkDescriptorSetLayout g_descriptor_set_layout;
-    VkDescriptorPool g_descriptor_pool;
-
-    uint32_t current_frame = 1;
+    GLFWwindow* get_window();
 };
