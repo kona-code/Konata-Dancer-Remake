@@ -1,7 +1,6 @@
 #include "logger.h"
 #include "core.h"
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <ios>
@@ -14,8 +13,8 @@
   #include <shlobj.h>
 #endif
 
-static std::filesystem::path logpath;
-static bool DEBUG;
+static std::ofstream logfile;
+static bool debug;
 
 const static std::filesystem::path getpath() {
 #ifdef _WIN32
@@ -26,98 +25,109 @@ const static std::filesystem::path getpath() {
         if (len) WideCharToMultiByte(CP_UTF8, 0, knownPath, -1, &utf8[0], len, nullptr, nullptr);
         CoTaskMemFree(knownPath);
         std::filesystem::path p(utf8);
-        p /= "konacode"/konacore::project/"konata-dancer-remake.log";
+        p /= "konacode";
+        p /= konacore::project;
+        p /= "konacore-runtime.log";
         return p;
     }
     if (const char* up = std::getenv("USERPROFILE")) {
         std::filesystem::path p(up);
-        p /= "AppData/Local/konacode"/konacore::project/"konata-dancer-remake.log";
+        p /= "AppData";
+        p /= "Local";
+        p /= "konacode";
+        p /= konacore::project;
+        p /="konata-dancer-runtime.log";
         return p;
     }
 #endif
     if (const char* home = std::getenv("HOME")) {
-        return std::filesystem::path(home) / ".config/konacode"/konacore::project/"konata-dancer-remake.log";
+        return std::filesystem::path(home) / ".config"/"konacode"/konacore::project/"konata-dancer-runtime.log";
     }
-    return std::filesystem::path("konata-dancer-remake.log");
+    return std::filesystem::path("konata-dancer-runtime.log");
 }
 
-void logger::initialize(const bool& log_to_file, const bool& debug) {
+
+void logger::initialize(const bool& log_to_file, const bool& enable_debug) {
+    std::filesystem::path logpath;
     if (log_to_file) {
         logpath = getpath();
-        std::error_code ec;
         if (!logpath.parent_path().empty())
-            std::filesystem::create_directories(logpath.parent_path(), ec);
+            std::filesystem::create_directories(logpath.parent_path());
+        logfile.open(logpath, std::ios::app);
         if (!std::filesystem::exists(logpath)) {
-            std::ofstream f(logpath);
-            f.close();
-            printf("\033[1m[LOGGER]\033[0m Created missing file \"%s\".\n", logpath.parent_path().c_str());
+            printf("\033[0m[INF]\033[0m <logger> Created missing file \"%s\".\n", logpath.c_str());
+            logfile << "[INF] <logger> Created missing file " << logpath << ".\n";
         }
-        printf("\033[1m[LOGGER]\033[0m Logging to \"%s\".\n", logpath.parent_path().c_str());
-    } else { printf("\033[1m[LOGGER]\033[0m Logging has been disabled!\n"); }
-    if (debug) {
-        printf("\033[1m[LOGGER]\033[95;1m Debug mode has been enable! You will see additional in-detail logs.\033[0m\n");
-        DEBUG = std::move(debug);
+        printf("\033[0m[INF]\033[0m <logger> Logging to \"%s\".\n", logpath.c_str());
+    } else { printf("\033[0m[INF]\033[0m <logger> Logging to file has been disabled!\n"); }
+    if (enable_debug) {
+        printf("\033[0m[INF][0m[38;2;184;138;237m <logger> Debug mode has been enabled! You will see additional detailed logs.\033[0m\n");
+        debug = true;
     }
 }
 
 
-void logger::log(std::string content, LogType type) {
-    time_t tm=time(0);
-    struct tm * t = localtime(&tm);
-    if (std::filesystem::exists(logpath)) {
-        static std::ofstream f;
-        f.open(logpath,std::ios_base::app);
+void logger::log(const std::string_view content, const LogType type) {
+    const time_t tm = time(0);
+    // const struct tm* t = localtime(&tm);
+    char tbuf[32];
+    strftime(tbuf, sizeof(tbuf), "%H:%M:%S %d/%m/%Y", localtime(&tm));
+// #ifdef _WIN32
+//     localtime_s(&tm,t);
+// #else
+//     localtime_r(&tm,t);
+// #endif
+    if (logfile.is_open()) {
         switch (type) {
             case inf:
-                printf("\033[0;1m[INF]\033[0;90m (%.*s)\033[0m %s\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
-                f << "[INF] (" << std::put_time(t, "%c") << ") " << content << std::endl;
+                printf("\033[0m[INF]\033[0;90m (%s)\033[0m %.*s\n",tbuf,(int)content.size(),content.data());
+                logfile << "[INF] (" << tbuf << ") " << content << '\n';
                 break;
             case wrn:
-                printf("\033[33;1m[WRN]\033[0;33m (%.*s) %s\033[0m\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
-                f << "[WRN] (" << std::put_time(t, "%c") << ") " << content << std::endl;
+                printf("[0m[38;2;234;188;110m[WRN] (%s) %.*s\033[0m\n",tbuf,(int)content.size(),content.data());
+                logfile << "[WRN] (" << tbuf << ") " << content << '\n';
                 break;
             case err:
-                fprintf(stderr,"\033[31;1m[ERR]\033[0;31m (%.*s) %s\033[0m\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
-                f << "[ERR] (" << std::put_time(t, "%c") << ") " << content << std::endl;
+                fprintf(stderr,"[38;2;225;105;138m[ERR] (%s) %.*s\033[0m\n",tbuf,(int)content.size(),content.data());
+                logfile << "[ERR] (" << tbuf << ") " << content << '\n';
                 break;
             case exc:
-                fprintf(stderr,"\033[31;1m[EXCEPTION]\033[0;31m (%.*s) %s\033[0m\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
-                f << "\n    AN UNEXPECTED EXCEPTION OCCURED!\n       (" << std::put_time(t, "%c") << ")\n\nException details: \n" << content << std::endl;
+                fprintf(stderr,"\n\n[38;2;225;105;138m[EXC] AN EXCEPTION OCCURED AT %s!\n\033[4mException details:\033[24m\n%.*s\033[0m\n\n",tbuf,(int)content.size(),content.data());
+                logfile << "\n    AN EXCEPTION OCCURED AT " << tbuf << "!\n\nException details: \n" << content << '\n';
                 break;
             case dbg:
-                if (DEBUG) {
-                    printf("\033[95;1m[DBG]\033[0;35m (%.*s) %s\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
-                    f << "[DBG] (" << std::put_time(t, "%c") << ") " << content << std::endl;
+                if (debug) {
+                    printf("[0m[38;2;184;138;237m[DBG] (%s) [0m[38;2;184;148;237m%.*s\n",tbuf,(int)content.size(),content.data());
+                    logfile << "[DBG] (" << tbuf << ") " << content << '\n';
                 }
                 break;
             default:
-                printf("[INF] (%.*s) %s\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
-                f << "[INF] (" << std::put_time(t, "%c") << ") " << content << std::endl;
+                printf("[INF] (%s) %.*s\n",tbuf,(int)content.size(),content.data());
+                logfile << "[INF] (" << tbuf << ") " << content << '\n';
                 break;
             
         }
-        f.close();
     } else {
         switch (type) {
             case inf:
-                printf("\033[0;1m[INF]\033[0;90m (%.*s)\033[0m %s\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
+                printf("\033[0m[INF]\033[0;90m (%s)\033[0m %.*s\n",tbuf,(int)content.size(),content.data());
                 break;
             case wrn:
-                printf("\033[33;1m[WRN]\033[0;33m (%.*s) %s\033[0m\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
+                printf("[0m[38;2;234;188;110m[WRN] (%s) %.*s\033[0m\n",tbuf,(int)content.size(),content.data());
                 break;
             case err:
-                fprintf(stderr,"\033[31;1m[ERR]\033[0;31m (%.*s) %s\033[0m\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
+                fprintf(stderr,"[38;2;225;105;138m[ERR] (%s) %.*s\033[0m\n",tbuf,(int)content.size(),content.data());
                 break;
             case exc:
-                fprintf(stderr,"\n\033[31;1mAN UNEXPECTED EXCEPTION OCCURED!\033[0;31m (%.*s)\n\033[4mException details:\033[24m\n%s\033[0m\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
+                fprintf(stderr,"\n\n[38;2;225;105;138m[EXC] AN EXCEPTION OCCURED AT %s!\n\033[4mException details:\033[24m\n%.*s\033[0m\n\n",tbuf,(int)content.size(),content.data());
                 break;
             case dbg:
-                if (DEBUG) {
-                    printf("\033[95;1m[DBG]\033[0;35m (%.*s) %s\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
+                if (debug) {
+                    printf("[0m[38;2;184;138;237m[DBG] (%s) [0m[38;2;184;148;237m%.*s\n",tbuf,(int)content.size(),content.data());
                 }
                 break;
             default:
-                printf("[INF] (%.*s) %s\n",(int)strcspn(({char *p=ctime_r(&tm,(char[26]){}); p;}),"\n"),ctime_r(&tm, (char[26]){}),content.c_str());
+                printf("[INF] (%s) %.*s\n",tbuf,(int)content.size(),content.data());
                 break;
             
         }
