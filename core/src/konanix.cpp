@@ -385,8 +385,7 @@ static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurface
     // }
     // return available_formats[0];
     for (const VkSurfaceFormatKHR& f : available_formats) {
-        if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
-             f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
+        if (f.format == VK_FORMAT_R8G8B8A8_SRGB &&
             f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return f;
         }
@@ -1737,39 +1736,41 @@ void konanix::create_descriptor_set_layout() {
 
 void konanix::create_gif_image(uint32_t width, uint32_t height) {
     const static SwapChainSupportDetails swap_chain_support = query_swap_chain_support(g_physicaldevice, g_surface);
-    static VkFormat format;
-    for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
-        if ((f.format == VK_FORMAT_R8G8B8A8_SRGB ||
-             f.format == VK_FORMAT_R8G8B8A8_SRGB) &&
-            f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            format = VK_FORMAT_R8G8B8A8_SRGB;
-        }
-    }
+    // static VkFormat format;
+    const VkSurfaceFormatKHR format = choose_swap_surface_format(swap_chain_support.formats);
 
-    if (!format)
-        for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
-            if ((f.format == VK_FORMAT_B8G8R8A8_UNORM ||
-                 f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
-                f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-                format = VK_FORMAT_B8G8R8A8_UNORM;
-            }
-        }
+    // for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
+    //     if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
+    //          f.format == VK_FORMAT_B8G8R8A8_SRGB) &&
+    //         f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+    //         format = VK_FORMAT_R8G8B8A8_SRGB;
+    //     }
+    // }
 
-    if (!format)
-        for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
-            if (f.format == VK_FORMAT_B8G8R8_SRGB &&
-                f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-                format = VK_FORMAT_B8G8R8_SRGB;
-            }
-        }
+    // if (!format)
+    //     for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
+    //         if ((f.format == VK_FORMAT_B8G8R8A8_UNORM ||
+    //              f.format == VK_FORMAT_R8G8B8A8_UNORM) &&
+    //             f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+    //             format = VK_FORMAT_B8G8R8A8_UNORM;
+    //         }
+    //     }
+
+    // if (!format)
+    //     for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
+    //         if (f.format == VK_FORMAT_B8G8R8_SRGB &&
+    //             f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+    //             format = VK_FORMAT_B8G8R8_SRGB;
+    //         }
+    //     }
         
-    create_image(width,height,format,
+    create_image(width,height,format.format,
     VK_IMAGE_TILING_OPTIMAL,
     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     g_gif_image,g_gif_image_memory);
 
-    g_gif_image_view = create_image_view(g_gif_image, format);
+    g_gif_image_view = create_image_view(g_gif_image, format.format);
     g_gif_sampler = create_sampler();
 }
 
