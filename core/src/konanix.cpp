@@ -1513,6 +1513,10 @@ void konanix::recreate_swap_chain() {
     for (VkImageView iw : g_swapchain_image_views)
         vkDestroyImageView(g_device, iw, nullptr);
     
+    vkDestroyImage(g_device,g_gif_image,nullptr);
+    vkDestroyImageView(g_device, g_gif_image_view, nullptr);
+    vkDestroySampler(g_device,g_gif_sampler,nullptr);
+    
     vkDestroySwapchainKHR(g_device, g_swapchain, nullptr);
 
     create_swap_chain();
@@ -1737,7 +1741,7 @@ void konanix::create_descriptor_set_layout() {
 void konanix::create_gif_image(uint32_t width, uint32_t height) {
     const static SwapChainSupportDetails swap_chain_support = query_swap_chain_support(g_physicaldevice, g_surface);
     // static VkFormat format;
-    const VkSurfaceFormatKHR format = choose_swap_surface_format(swap_chain_support.formats);
+    const VkSurfaceFormatKHR surface_format = choose_swap_surface_format(swap_chain_support.formats);
 
     // for (const VkSurfaceFormatKHR& f : swap_chain_support.formats) {
     //     if ((f.format == VK_FORMAT_B8G8R8A8_SRGB ||
@@ -1764,13 +1768,13 @@ void konanix::create_gif_image(uint32_t width, uint32_t height) {
     //         }
     //     }
         
-    create_image(width,height,format.format,
+    create_image(width,height,surface_format.format,
     VK_IMAGE_TILING_OPTIMAL,
     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     g_gif_image,g_gif_image_memory);
 
-    g_gif_image_view = create_image_view(g_gif_image, format.format);
+    g_gif_image_view = create_image_view(g_gif_image, surface_format.format);
     g_gif_sampler = create_sampler();
 }
 
@@ -1990,7 +1994,8 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
     // logger::log("Freed up unneeded memory!",logger::dbg);
 }
 
-void konanix::draw_frame() {
+void konanix::draw_frame(int w, int h) {
+    width = w; height = h;
     // glfwSetWindowSize(g_window,width,height);
     vkWaitForFences(g_device,1,&g_in_flight_fences[current_frame],VK_TRUE,UINT64_MAX);
     // vkResetFences(g_device,1,&g_in_flight_fences[current_frame]);

@@ -22,7 +22,7 @@ namespace konanix {
     void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &resizable = false);
     void render();
     void cleanup();
-    void draw_frame();
+    void draw_frame(int width, int height);
     void create_descriptor_set();
 
     void create_gif_image(uint32_t width, uint32_t height);

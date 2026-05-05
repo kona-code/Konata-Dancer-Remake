@@ -450,6 +450,7 @@ int main(int argc, char *argv[]) {
     // auto next_frame_time = std::chrono::steady_clock::now() +
     // std::chrono::milliseconds(std::max(1, anim.frames[0].delay_ms));
     konanix::Overlay ctx; // context menu renderer
+    int outdatedw = iw, outdatedh = ih;
     logger::log("Initialized!");
     logger::log("Started rendering loop!");
     while (!glfwWindowShouldClose(konanix::get_window())) {
@@ -467,8 +468,12 @@ int main(int argc, char *argv[]) {
             // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
         // }
 
-        glfwGetWindowSize(konanix::get_window(), &ctx.w, &ctx.h);
+        glfwGetFramebufferSize(konanix::get_window(), &ctx.w, &ctx.h);
             
+        if (outdatedw != ctx.w || outdatedh != ctx.h) {
+            konanix::recreate_swap_chain();
+            outdatedw = ctx.w; outdatedh = ctx.h;
+        }
         ctx.storage.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
         ctx.rgba = ctx.storage.data();
         ctx.clear();
@@ -489,8 +494,7 @@ int main(int argc, char *argv[]) {
             ctx.h,
             frame_index == 0
         );
-
-        konanix::draw_frame();
+        konanix::draw_frame(ctx.w,ctx.h);
         glfwPollEvents();
     }
 
