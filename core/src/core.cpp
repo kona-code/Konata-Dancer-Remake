@@ -478,11 +478,13 @@ int main(int argc, char *argv[]) {
         ctx.rgba = ctx.storage.data();
         ctx.clear();
         std::vector<uint8_t> overlay_buffer;
-        overlay_buffer.resize(size_t(ctx.w) * size_t(ctx.h) * 4);
-        // memcpy(&overlay_buffer,
-        //             &anim.frames[frame_index].rgba,
-        //             std::min(overlay_buffer.size(), anim.frames[frame_index].rgba.size()));
-        overlay_buffer = anim.frames[frame_index].rgba;
+        overlay_buffer.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
+        ctx.rgba = overlay_buffer.data();
+        ctx.clear();
+
+        const auto& src = anim.frames[frame_index].rgba;
+        const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
+        memcpy(overlay_buffer.data(), src.data(), copy_bytes);
         ctx.rgba = overlay_buffer.data();
 
         konanix::draw_context_menu(ctx);

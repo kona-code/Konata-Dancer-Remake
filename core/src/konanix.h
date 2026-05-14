@@ -71,6 +71,7 @@ namespace konanix {
     void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
     void create_descriptor_pool();
     void create_descriptor_set_layout();
+    void update_descriptor_set();
 
     VkCommandBuffer begin_single_time_commands();
     void end_single_time_commands(VkCommandBuffer command_buffer);

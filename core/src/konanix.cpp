@@ -1522,6 +1522,7 @@ void konanix::recreate_swap_chain() {
     create_swap_chain();
     create_image_views();
     create_gif_image(width, height);
+    update_descriptor_set();
     create_framebuffers();
 
     logger::log("Swap chain recreated!",logger::dbg);
@@ -1736,6 +1737,30 @@ void konanix::create_descriptor_set_layout() {
     if (vkCreateDescriptorSetLayout(g_device,&layout_info,nullptr,&g_descriptor_set_layout) != VK_SUCCESS) {
         throw std::runtime_error("failed to create descriptor set");
     }
+}
+
+void konanix::update_descriptor_set() {
+    const VkDescriptorImageInfo image_info {
+        g_gif_sampler,
+        g_gif_image_view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    const VkWriteDescriptorSet write {
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        nullptr,
+
+        g_descriptor_set,
+        0,
+        0,
+        1,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        &image_info,
+        nullptr,
+        nullptr
+    };
+
+    vkUpdateDescriptorSets(g_device,1,&write,0,nullptr);
 }
 
 void konanix::create_gif_image(uint32_t width, uint32_t height) {
