@@ -3,7 +3,6 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <ios>
 #include <time.h>
 
 #ifdef _WIN32
@@ -27,7 +26,7 @@ const static std::filesystem::path getpath() {
         std::filesystem::path p(utf8);
         p /= "konacode";
         p /= konacore::project;
-        p /= "konacore-runtime.log";
+        p /= "konanix-runtime.log";
         return p;
     }
     if (const char* up = std::getenv("USERPROFILE")) {
@@ -36,16 +35,15 @@ const static std::filesystem::path getpath() {
         p /= "Local";
         p /= "konacode";
         p /= konacore::project;
-        p /="konata-dancer-runtime.log";
+        p /="konanix-runtime.log";
         return p;
     }
 #endif
     if (const char* home = std::getenv("HOME")) {
-        return std::filesystem::path(home) / ".config"/"konacode"/konacore::project/"konata-dancer-runtime.log";
+        return std::filesystem::path(home) / ".config/konacode"/konacore::project/"konanix-runtime.log";
     }
-    return std::filesystem::path("konata-dancer-runtime.log");
+    return std::filesystem::path("konanix-runtime.log");
 }
-
 
 void logger::initialize(const bool& log_to_file, const bool& enable_debug) {
     std::filesystem::path logpath;
@@ -98,6 +96,7 @@ void logger::log(const std::string_view content, const LogType type) {
             case dbg:
                 if (debug) {
                     printf("[0m[38;2;184;138;237m[DBG] (%s) [0m[38;2;184;148;237m%.*s\n",tbuf,(int)content.size(),content.data());
+                    // printf("[0m[38;2;184;138;237m[DBG][0m[38;2;144;108;197m (%s) [0m[38;2;184;148;237m%.*s\n",tbuf,(int)content.size(),content.data());
                     logfile << "[DBG] (" << tbuf << ") " << content << '\n';
                 }
                 break;
@@ -122,9 +121,9 @@ void logger::log(const std::string_view content, const LogType type) {
                 fprintf(stderr,"\n\n[38;2;225;105;138m[EXC] AN EXCEPTION OCCURED AT %s!\n\033[4mException details:\033[24m\n%.*s\033[0m\n\n",tbuf,(int)content.size(),content.data());
                 break;
             case dbg:
-                if (debug) {
+                if (debug)
                     printf("[0m[38;2;184;138;237m[DBG] (%s) [0m[38;2;184;148;237m%.*s\n",tbuf,(int)content.size(),content.data());
-                }
+                    // printf("[0m[38;2;184;138;237m[DBG][0m[38;2;144;108;197m (%s) [0m[38;2;184;148;237m%.*s\n",tbuf,(int)content.size(),content.data());
                 break;
             default:
                 printf("[INF] (%s) %.*s\n",tbuf,(int)content.size(),content.data());
