@@ -18,6 +18,7 @@
 
 namespace konanix {
     inline GLFWwindow* g_window = nullptr;
+    inline bool g_swapchain_rebuild = false;
     void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
     void render();
     void cleanup();
