@@ -18,8 +18,8 @@
 
 #include "logger.h"
 
-#include "frag.c"
-#include "vert.c"
+#include "./shaders/frag.c"
+#include "./shaders/vert.c"
 
 static GLFWwindow*                     g_window                        = nullptr;
 static VkInstance                      g_instance                      = nullptr;
@@ -477,7 +477,7 @@ uint32_t konanix::find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags pr
 }
 
 void konanix::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &buffer_memory) {
-    const static VkBufferCreateInfo buffer_info {
+    VkBufferCreateInfo buffer_info {
         VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         VK_NULL_HANDLE,
         0,
@@ -495,7 +495,7 @@ void konanix::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     VkMemoryRequirements mem_requirements;
     vkGetBufferMemoryRequirements(g_device,buffer,&mem_requirements);
 
-    const static VkMemoryAllocateInfo alloc_info {
+    VkMemoryAllocateInfo alloc_info {
         VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         VK_NULL_HANDLE,
 
