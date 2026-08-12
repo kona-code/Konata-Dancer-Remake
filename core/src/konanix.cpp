@@ -16,48 +16,83 @@
 #include <vulkan/vulkan_core.h>
 #include <GLFW/glfw3.h>
 
-#include "logger.h"
+#include "./util/logger.h"
 
 #include "./shaders/frag.c"
 #include "./shaders/vert.c"
 
-static GLFWwindow*                     g_window                        = nullptr;
-static VkInstance                      g_instance                      = nullptr;
-static VkSurfaceKHR                    g_surface                       = nullptr;
+#define KONANIX_BUILD_WITH_VALIDATION
 
-static VkPhysicalDevice                g_physicaldevice                = nullptr;
-static VkDevice                        g_device                        = nullptr;
-static VkQueue                         g_graphicsqueue                 = nullptr;
-static VkQueue                         g_presentqueue                  = nullptr;
+static GLFWwindow*                      g_window                        = nullptr;
+static VkInstance                       g_instance                      = nullptr;
+static VkSurfaceKHR                     g_surface                       = nullptr;
 
-static VkSwapchainKHR                  g_swapchain                     = nullptr;
-static std::vector<VkImage>            g_swapchain_images              {};
-static VkFormat                        g_swapchain_image_format        {};
-static VkExtent2D                      g_swapchain_extent              {};
-static std::vector<VkImageView>        g_swapchain_image_views         {};
-static std::vector<VkFramebuffer>      g_swapchain_framebuffers        {};
+static VkPhysicalDevice                 g_physicaldevice                = nullptr;
+static VkDevice                         g_device                        = nullptr;
+static VkQueue                          g_graphicsqueue                 = nullptr;
+static VkQueue                          g_presentqueue                  = nullptr;
 
-static VkRenderPass                    g_renderpass                    = nullptr;
-static VkPipelineLayout                g_pipeline_layout               = nullptr;
-static VkPipeline                      g_graphics_pipeline             = nullptr;
+static VkSwapchainKHR                   g_swapchain                     = nullptr;
+static std::vector<VkImage>             g_swapchain_images              {};
+static VkFormat                         g_swapchain_image_format        {};
+static VkExtent2D                       g_swapchain_extent              {};
+static std::vector<VkImageView>         g_swapchain_image_views         {};
+static std::vector<VkFramebuffer>       g_swapchain_framebuffers        {};
 
-static VkCommandPool                   g_commandpool                   = nullptr;
-static std::vector<VkCommandBuffer>    g_commandbuffers                {};
-static VkDescriptorSet                 g_descriptor_set                = nullptr;
-static VkDescriptorSetLayout           g_descriptor_set_layout         = nullptr; 
-static VkDescriptorPool                g_descriptor_pool               = nullptr;
+static VkRenderPass                     g_renderpass                    = nullptr;
+static VkPipelineLayout                 g_pipeline_layout               = nullptr;
+static VkPipeline                       g_graphics_pipeline             = nullptr;
 
-static std::vector<VkSemaphore>        g_image_available_semaphores    {};
-static std::vector<VkSemaphore>        g_render_finished_semaphores    {};
-static std::vector<VkFence>            g_in_flight_fences              {};
+static VkCommandPool                    g_commandpool                   = nullptr;
+static std::vector<VkCommandBuffer>     g_commandbuffers                {};
+static VkDescriptorSet                  g_descriptor_set                = nullptr;
+static VkDescriptorSetLayout            g_descriptor_set_layout         = nullptr; 
+static VkDescriptorPool                 g_descriptor_pool               = nullptr;
 
-static uint32_t                        current_frame = 1;
-static int                             width, height;
+static std::vector<VkSemaphore>         g_image_available_semaphores    {};
+static std::vector<VkSemaphore>         g_render_finished_semaphores    {};
+static std::vector<VkFence>             g_in_flight_fences              {};
 
-VkImage                                 g_gif_image                     = nullptr;
-VkDeviceMemory                          g_gif_image_memory              = nullptr;
-VkImageView                             g_gif_image_view                = nullptr;
-VkSampler                               g_gif_sampler                   = nullptr;
+static uint32_t                         current_frame = 1;
+static int                              width, height;
+
+static VkImage                          g_gif_image                     = nullptr;
+static VkDeviceMemory                   g_gif_image_memory              = nullptr;
+static VkImageView                      g_gif_image_view                = nullptr;
+static VkSampler                        g_gif_sampler                   = nullptr;
+
+static bool                             DEBUG                           = false;
+
+static const char**                     exts;
+static uint32_t                         n_exts                          = 0;
+
+#ifdef KONANIX_BUILD_WITH_VALIDATION
+static VkDebugUtilsMessengerEXT         g_debug_messenger           = nullptr;
+
+constexpr static VKAPI_ATTR VkBool32 VKAPI_CALL validation_callback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
+    switch (messageSeverity) {
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+            logger::log("<vulkan validation> "+std::string(pCallbackData->pMessage),logger::dbg);
+            return VK_FALSE;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+            logger::log("<vulkan validation> "+std::string(pCallbackData->pMessage),logger::inf);
+            return VK_FALSE;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+            logger::log("<vulkan validation> "+std::string(pCallbackData->pMessage),logger::wrn);
+            return VK_FALSE;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+            logger::log("<vulkan validation> "+std::string(pCallbackData->pMessage),logger::err);
+            return VK_FALSE;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_FLAG_BITS_MAX_ENUM_EXT:
+            logger::log("<vulkan validation> "+std::string(pCallbackData->pMessage),logger::exc);
+            return VK_FALSE;
+        default:
+            logger::log("<vulkan validation> "+std::string(pCallbackData->pMessage),logger::dbg);
+            return VK_FALSE;
+    }
+    
+}
+#endif
 
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
@@ -73,8 +108,6 @@ struct QueueFamilyIndices {
         return (graphicsFamily.has_value()&&presentFamily.has_value());
     }
 };
-
-GLFWwindow* konanix::get_window() { return g_window; }
 
 void konanix::Overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (x < 0 || y < 0 || x >= w || y >= h) return;
@@ -422,8 +455,25 @@ static VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurface
 
 static VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentModeKHR> &available_present_modes) {
     for (const VkPresentModeKHR& availablePresentMode : available_present_modes) {
+        if (availablePresentMode==VK_PRESENT_MODE_MAILBOX_KHR) {
+#ifdef KONANIX_BUILD_WITH_VALIDATION
+            logger::log("<konanix> Using present mode VK_PRESENT_MODE_MAILBOX_KHR",logger::dbg);
+#endif
+            return availablePresentMode;
+        }
         if (availablePresentMode==VK_PRESENT_MODE_MAILBOX_KHR) return availablePresentMode;
     }
+    for (const VkPresentModeKHR& availablePresentMode : available_present_modes) {
+        if (availablePresentMode==VK_PRESENT_MODE_IMMEDIATE_KHR) {
+#ifdef KONANIX_BUILD_WITH_VALIDATION
+            logger::log("<konanix> Using present mode VK_PRESENT_MODE_IMMEDIATE_KHR",logger::dbg);
+#endif
+            return availablePresentMode;
+        }
+    }
+#ifdef KONANIX_BUILD_WITH_VALIDATION
+    logger::log("<konanix> Using present mode VK_PRESENT_MODE_FIFO_KHR",logger::dbg);
+#endif
     return VK_PRESENT_MODE_FIFO_KHR; // best default option
 }
 
@@ -592,10 +642,10 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
 
 }
 
-void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &resizable) {
+void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug, const bool &resizable) {
     width = std::move(w);
     height = std::move(h);
-
+    DEBUG = debug;
 
     if (!glfwInit()) {
         logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
@@ -659,9 +709,18 @@ void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &resiz
 }
 
 void konanix::cleanup() {
-    if (g_device!=VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(g_device);
+    logger::log("<konanix> Cleaning up Vulkan resources...",logger::dbg);
+
+    vkDeviceWaitIdle(g_device);
+
+#ifdef KONANIX_BUILD_WITH_VALIDATION
+    if (DEBUG) {
+        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(g_instance, "vkDestroyDebugUtilsMessengerEXT");
+        if (func)
+            func(g_instance,g_debug_messenger,nullptr);
     }
+    logger::log("<konanix> Debug messenger destroyed!",logger::dbg);
+#endif
 
     if (g_gif_sampler != VK_NULL_HANDLE) {
         vkDestroySampler(g_device, g_gif_sampler, nullptr);
@@ -793,20 +852,8 @@ void konanix::create_instance() {
         VK_API_VERSION_1_0
     };
 
-    uint32_t extension_count = 0;
-    const char** glfw_extensions = glfwGetRequiredInstanceExtensions(&extension_count);
+    exts = glfwGetRequiredInstanceExtensions(&n_exts);
     
-    // const VkInstanceCreateInfo createInfo {
-    //     VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-    //     VK_NULL_HANDLE,
-    //     0,
-    //     &appInfo,
-    //     0,
-    //     0,
-    //     extension_count,
-    //     glfwGetRequiredInstanceExtensions(&extension_count)
-    // };
-
     VkInstanceCreateInfo instance_info{};
     instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instance_info.pApplicationInfo = &appInfo;
@@ -828,15 +875,61 @@ void konanix::create_instance() {
     instance_info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
     instance_info.ppEnabledExtensionNames = extensions.data();
 #else
-    instance_info.ppEnabledExtensionNames = glfw_extensions;
-    instance_info.enabledExtensionCount = extension_count;
+    instance_info.ppEnabledExtensionNames = exts;
+    instance_info.enabledExtensionCount = n_exts;
 #endif
 #endif
 
+#ifdef KONANIX_BUILD_WITH_VALIDATION
+    if (DEBUG) {
+        logger::log("<konanix> Debug mode is enabled! You will receive validation logs, but may notice a performance drop!",logger::wrn);
+        constexpr static VkDebugUtilsMessengerCreateInfoEXT validation_info {
+            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+            .pNext = nullptr,
+            .flags = 0,
+
+            .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+            .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+            .pfnUserCallback = validation_callback,
+            .pUserData = nullptr
+
+        };
+        const char* layers[] = {"VK_LAYER_KHRONOS_validation"};
+        std::vector<const char*> extensions;
+        extensions.reserve(n_exts + 1);
+        for (uint32_t i = 0; i < n_exts; ++i)
+            extensions.push_back(exts[i]);
+        extensions.push_back("VK_EXT_debug_utils");
+        instance_info.enabledLayerCount = 1;
+        instance_info.ppEnabledLayerNames = layers;
+        instance_info.enabledExtensionCount = extensions.size();
+        instance_info.ppEnabledExtensionNames = extensions.data();
+        instance_info.pNext = &validation_info;
+
+        if (vkCreateInstance(&instance_info,nullptr,&g_instance) != VK_SUCCESS) {
+            logger::log("<konanix> Unable to create a Vulkan instance!",logger::exc);
+            throw std::runtime_error("failed to create instance");
+        }
+        auto create_layers = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(g_instance, "vkCreateDebugUtilsMessengerEXT");
+        if (create_layers(g_instance, &validation_info, nullptr, &g_debug_messenger) != VK_SUCCESS) {
+            logger::log("<konanix> Could not setup the debug messenger!",logger::exc);
+            throw std::runtime_error("failed to setup debug messenger!");
+        }
+    } else {
+        if (vkCreateInstance(&instance_info,nullptr,&g_instance) != VK_SUCCESS) {
+            logger::log("<konanix> Unable to create a Vulkan instance!",logger::exc);
+            throw std::runtime_error("failed to create instance");
+        }
+    }
+#else
+
     if (vkCreateInstance(&instance_info,nullptr,&g_instance) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed to create a Vulkan instance!",logger::exc);
+        logger::log("<konanix> Unable to create a Vulkan instance!",logger::exc);
         throw std::runtime_error("failed to create instance");
     }
+
+#endif
+
     logger::log("<Vulkan> Instance created successfully!",logger::dbg);
 }
 

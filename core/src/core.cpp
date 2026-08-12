@@ -1,6 +1,6 @@
 #include "core.h"
 #include "konanix.h"
-#include "logger.h"
+#include "./util/logger.h"
 #include <GLFW/glfw3.h>
 #include <cstddef>
 #include <cstdint>
@@ -228,7 +228,7 @@ static GifAnimation load_gif_animation(const std::filesystem::path& path) {
     if (!path.empty())
         gif = DGifOpenFileName(path.string().c_str(), &err);
     else
-        gif = open_gif_from_memory(konata, konata_len, &err);
+        gif = open_gif_from_memory(konata_bytecode, konata_bytecode_len, &err);
     if (!gif) {
         logger::log("DGifOpenFileName failed for \""+path.string()+"\"! Exception details: "+std::to_string(err),logger::exc);
         throw std::runtime_error("DGifOpenFileName failed for: " + path.string() + " err=" + std::to_string(err));
@@ -333,9 +333,9 @@ int main(int argc, char *argv[]) {
 
         "[0m[38;2;163;149;234mCopyright (C) konacode | https://konacode.com/\033[0m\n\n");
 
-    bool resizable = false;
+    bool resizable = false, debug = false;
     if (argc>0) {
-        bool log_to_file = false, debug = false;
+        bool log_to_file = false;
         for (int i = 1; i < argc; i++) {
             const std::string arg = argv[i];
             if (arg == "-debug" || arg == "--debug" || arg == "-d") debug = true;
@@ -381,7 +381,7 @@ int main(int argc, char *argv[]) {
 
     konanix::image_size = iw*ih*4;
     try {
-        konanix::initialize(iw, ih, resizable);
+        konanix::initialize(iw, ih, debug, resizable);
     } catch (std::exception &e) {
         logger::log("Could not initialize Vulkan! Exception details: "+std::string(e.what()),logger::err);
         exit(1);
@@ -406,7 +406,7 @@ int main(int argc, char *argv[]) {
     int outdatedw = iw, outdatedh = ih;
     logger::log("Initialized!");
     logger::log("Started rendering loop!");
-    while (!glfwWindowShouldClose(konanix::get_window())) {
+    while (!glfwWindowShouldClose(konanix::g_window)) {
         // const auto now = std::chrono::steady_clock::now();
         // if (now >= next_frame_time) {
         std::this_thread::sleep_for(std::chrono::milliseconds(anim.frames[frame_index].delay_ms));
@@ -421,7 +421,7 @@ int main(int argc, char *argv[]) {
             // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
         // }
 
-        glfwGetFramebufferSize(konanix::get_window(), &ctx.w, &ctx.h);
+        glfwGetFramebufferSize(konanix::g_window, &ctx.w, &ctx.h);
             
         if (outdatedw != ctx.w || outdatedh != ctx.h) {
             konanix::recreate_swap_chain();

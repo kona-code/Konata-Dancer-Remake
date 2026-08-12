@@ -1,5 +1,5 @@
 #include "logger.h"
-#include "core.h"
+#include "../core.h"
 #include <cstdio>
 #include <filesystem>
 #include <fstream>

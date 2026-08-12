@@ -3,7 +3,6 @@
 #include <string>
 #include <vector>
 #include <vulkan/vulkan.h>
-#include <atomic>
 #include <vulkan/vulkan_core.h>
 
 #ifdef _WIN32
@@ -18,8 +17,8 @@
 #include <GLFW/glfw3native.h>
 
 namespace konanix {
-    inline std::atomic<bool> running {true};
-    void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &resizable = false);
+    inline GLFWwindow* g_window = nullptr;
+    void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
     void render();
     void cleanup();
     void draw_frame(int width, int height);
@@ -83,5 +82,4 @@ namespace konanix {
     constexpr static short version[3] = {1, 0, 0};
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
-    GLFWwindow* get_window();
 };
