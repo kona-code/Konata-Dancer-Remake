@@ -58,20 +58,27 @@
 using namespace konanix;
 
 static constexpr short                  version[3]                      = {1, 0, 0};
-static uint32_t                         current_frame = 1;
-
-static VkImage                          g_gif_image                     = nullptr;
-static VkDeviceMemory                   g_gif_image_memory              = nullptr;
-static VkImageView                      g_gif_image_view                = nullptr;
-static VkSampler                        g_gif_sampler                   = nullptr;
+static uint32_t                         current_frame                   = 1;
+static uint32_t                         current_gif_frame               = 1;
 
 static bool                             DEBUG                           = false;
 static bool                             RESIZABLE                       = false;
+static uint32_t                         GIF_FRAME_COUNT                 = 0;
 
 static const char**                     exts;
 static uint32_t                         n_exts                          = 0;
 
 static VkSampleCountFlagBits            g_msaa_samples                  = VK_SAMPLE_COUNT_1_BIT;
+
+struct gif_frame {
+    VkImage                             image                           = nullptr;
+    VkDeviceMemory                      image_memory                    = nullptr;
+    VkImageView                         image_view                      = nullptr;
+};
+    
+VkSampler                               g_gif_sampler                   = nullptr;
+
+static std::vector<gif_frame>           gif_frames                      = {};
 
 #ifdef KONANIX_BUILD_WITH_VALIDATION
 static VkDebugUtilsMessengerEXT         g_debug_messenger               = nullptr;
@@ -1055,7 +1062,7 @@ void konanix::create_descriptor_set() {
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         const VkDescriptorImageInfo image_info{
             g_gif_sampler,
-            g_gif_image_view,
+            gif_frames[0].image_view,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         };
 
@@ -1114,7 +1121,7 @@ static void update_descriptor_set() {
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         const VkDescriptorImageInfo image_info {
             g_gif_sampler,
-            g_gif_image_view,
+            gif_frames[0].image_view,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         };
 
@@ -1801,61 +1808,196 @@ static void copy_buffer_to_image(
     konanix::end_single_time_commands(cmd);
 }
 
-void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload) {
-    VkBuffer staging_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+// void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload) {
+//     VkBuffer staging_buffer = VK_NULL_HANDLE;
+//     VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+//
+//     create_buffer(
+//         static_cast<VkDeviceSize>(pixel_bytes),
+//         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+//         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+//         staging_buffer,
+//         staging_memory
+//     );
+//     // logger::log("Created buffer for GIF frame",logger::dbg);
+//
+//     void* mapped = nullptr;
+//     if (vkMapMemory(globals::device::device, staging_memory, 0, pixel_bytes, 0, &mapped) != VK_SUCCESS) {
+//         vkDestroyBuffer(globals::device::device, staging_buffer, nullptr);
+//         vkFreeMemory(globals::device::device, staging_memory, nullptr);
+//         logger::log("Failed to map staging memory!",logger::exc);
+//         throw std::runtime_error("failed to map staging memory");
+//     }
+//
+//     memcpy(mapped, rgba_pixels, pixel_bytes);
+//     vkUnmapMemory(globals::device::device, staging_memory);
+//     // logger::log("Moved GIF pixel data to \"pixel_bytes\"!",logger::dbg);
+//
+//     const VkImageLayout from_layout = first_upload
+//         ? VK_IMAGE_LAYOUT_UNDEFINED
+//         : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+//
+//     transition_image_layout(
+//         g_gif_image,
+//         from_layout,
+//         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+//     );
+//
+//     copy_buffer_to_image(
+//         staging_buffer,
+//         g_gif_image,
+//         width,
+//         height
+//     );
+//     // logger::log("Successfully copied buffer to image!",logger::dbg);
+//
+//     transition_image_layout(
+//         g_gif_image,
+//         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+//         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+//     );
+//
+//     vkDestroyBuffer(globals::device::device, staging_buffer, nullptr);
+//     vkFreeMemory(globals::device::device, staging_memory, nullptr);
+//     // logger::log("Freed up unneeded memory!",logger::dbg);
+// }
 
-    create_buffer(
-        static_cast<VkDeviceSize>(pixel_bytes),
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        staging_buffer,
-        staging_memory
-    );
-    // logger::log("Created buffer for GIF frame",logger::dbg);
-
-    void* mapped = nullptr;
-    if (vkMapMemory(globals::device::device, staging_memory, 0, pixel_bytes, 0, &mapped) != VK_SUCCESS) {
-        vkDestroyBuffer(globals::device::device, staging_buffer, nullptr);
-        vkFreeMemory(globals::device::device, staging_memory, nullptr);
-        logger::log("Failed to map staging memory!",logger::exc);
-        throw std::runtime_error("failed to map staging memory");
+void create_image(const uint32_t w, const uint32_t h, const VkSampleCountFlagBits samples, uint32_t mip_levels, 
+                            const VkFormat format, const VkImageTiling tiling,
+                            const VkImageUsageFlags usage, const VkMemoryPropertyFlags properties,
+                            VkImage &image, VkDeviceMemory &memory) {
+    if (mip_levels < 1) {
+        mip_levels = 1;
+        logger::log("<konanix> Corrected image mip levels to 1.",logger::wrn);
     }
 
-    memcpy(mapped, rgba_pixels, pixel_bytes);
-    vkUnmapMemory(globals::device::device, staging_memory);
-    // logger::log("Moved GIF pixel data to \"pixel_bytes\"!",logger::dbg);
+    const VkImageCreateInfo image_info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
 
-    const VkImageLayout from_layout = first_upload
-        ? VK_IMAGE_LAYOUT_UNDEFINED
-        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = {
+            .width = w,
+            .height = h,
+            .depth = 1
+        },
+        .mipLevels = mip_levels,
+        .arrayLayers = 1,
+        .samples = samples,
+        .tiling = tiling,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
 
-    transition_image_layout(
-        g_gif_image,
-        from_layout,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-    );
+    if (vkCreateImage(konanix::globals::device::device,&image_info,globals::allocator,&image) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to create image!",logger::exc);
+        throw std::runtime_error("failed to create image");
+    }
 
-    copy_buffer_to_image(
-        staging_buffer,
-        g_gif_image,
-        width,
-        height
-    );
-    // logger::log("Successfully copied buffer to image!",logger::dbg);
+    VkMemoryRequirements m_req;
+    vkGetImageMemoryRequirements(konanix::globals::device::device,image,&m_req);
 
-    transition_image_layout(
-        g_gif_image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    );
+    const VkMemoryAllocateInfo alloc_info {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = nullptr,
 
-    vkDestroyBuffer(globals::device::device, staging_buffer, nullptr);
-    vkFreeMemory(globals::device::device, staging_memory, nullptr);
-    // logger::log("Freed up unneeded memory!",logger::dbg);
+        .allocationSize = m_req.size,
+        .memoryTypeIndex = konanix::globals::device::find_memory_type(m_req.memoryTypeBits,properties)
+    };
+
+    if (vkAllocateMemory(konanix::globals::device::device,&alloc_info,globals::allocator,&memory) != VK_SUCCESS) {
+        logger::log("<konanix> Could not allocate texture memory!",logger::exc);
+        throw std::runtime_error("failed to allocate memory");
+    }
+    vkBindImageMemory(konanix::globals::device::device,image,memory,0);
+
 }
 
-void konanix::create_gif_image(uint32_t width, uint32_t height) {
+void transition_image_layout(VkCommandBuffer &cmd, const VkImage &image, const VkImageLayout old_layout, const VkImageLayout new_layout, uint32_t mip_levels) {
+    VkImageMemoryBarrier barrier {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+
+        .srcAccessMask = 0,
+        .dstAccessMask = 0,
+
+        .oldLayout = old_layout,
+        .newLayout = new_layout,
+
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+
+        .image = image,
+        .subresourceRange = {
+            .aspectMask= VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = mip_levels,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
+    };
+
+    VkPipelineStageFlags src_stage;
+    VkPipelineStageFlags dst_stage;
+
+    if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = {};
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        logger::log("<konanix> Unsupported image layout transition!",logger::exc);
+        throw std::invalid_argument("unsupported layout transition");
+    }
+
+    vkCmdPipelineBarrier(cmd,
+        src_stage,dst_stage,
+        {},{},{},
+        0,nullptr,
+        1,&barrier
+    );
+}
+
+void copy_buffer_to_image(VkCommandBuffer &cmd, const VkBuffer &buffer, const VkImage &image, const uint32_t width, const uint32_t height) {
+    const VkBufferImageCopy region {
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        },
+        .imageOffset = {
+            .x = 0,
+            .y = 0,
+            .z = 0,
+        },
+        .imageExtent ={
+            .width = width,
+            .height = height,
+            .depth = 1
+        }
+    };
+
+    vkCmdCopyBufferToImage(cmd,
+        buffer,image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,&region
+    );
+}
+
+void konanix::create_gif_image(const char **pixels, const uint32_t &frame, uint32_t width, uint32_t height) {
     const static SwapChainSupportDetails swap_chain_support = query_swap_chain_support(globals::device::physical_device, globals::surface);
     // static VkFormat format;
     const VkSurfaceFormatKHR surface_format = choose_swap_surface_format(swap_chain_support.formats);
@@ -1884,18 +2026,66 @@ void konanix::create_gif_image(uint32_t width, uint32_t height) {
     //             format = VK_FORMAT_B8G8R8_SRGB;
     //         }
     //     }
-        
-    create_image(width,height,surface_format.format,
-    VK_IMAGE_TILING_OPTIMAL,
-    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-    g_gif_image,g_gif_image_memory);
 
-    g_gif_image_view = konanix::create_image_view(g_gif_image, surface_format.format);
-    g_gif_sampler = konanix::create_sampler();
+    if (!pixels) {
+            logger::log("<konanix> Failed to load texture image!",logger::exc);
+            throw std::runtime_error("failed to load texture");
+    }
+    
+    const VkDeviceSize size = width * height * 4;
+
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_buffer_mem;
+    create_buffer(size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        staging_buffer,staging_buffer_mem
+    );
+
+    void* data;
+    vkMapMemory(konanix::globals::device::device,staging_buffer_mem,0,size,0,&data);
+    memcpy(data,pixels,size);
+    vkUnmapMemory(konanix::globals::device::device,staging_buffer_mem);
+
+    create_image(width,height,VK_SAMPLE_COUNT_1_BIT,1,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        gif_frames[frame].image, gif_frames[frame].image_memory
+    );
+
+    VkCommandBuffer cmd = konanix::begin_single_time_commands();
+
+    transition_image_layout(cmd,gif_frames[frame].image,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1);
+    copy_buffer_to_image(cmd,staging_buffer,gif_frames[frame].image,static_cast<uint32_t>(width),static_cast<uint32_t>(height));
+    transition_image_layout(cmd,gif_frames[frame].image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
+    // generate_mipmaps(cmd, image, VK_FORMAT_R8G8B8A8_SRGB, t_width, t_height, 1);
+
+    konanix::end_single_time_commands(cmd);
+
+    vkDestroyBuffer(konanix::globals::device::device,staging_buffer,konanix::globals::allocator);
+    vkFreeMemory(konanix::globals::device::device,staging_buffer_mem,konanix::globals::allocator);
+
+    // create_image(width,height,surface_format.format,
+    // VK_IMAGE_TILING_OPTIMAL,
+    // VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+    // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    // gif_frames[frame].image,gif_frames[frame].image_memory);
+    //
+    // gif_frames[frame].image_view = konanix::create_image_view(gif_frames[frame].image, surface_format.format);
 
 
     // transition_image_layout(g_gif_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+void konanix::initialize_gif_dependencies(const uint32_t &frame_count) {
+    if (gif_frames.size()) {
+        logger::log("<konanix> Ignored update_gif_frame_count() call, since GIF frames are already loaded!",logger::wrn);
+        return;
+    }
+    GIF_FRAME_COUNT = frame_count;
+    gif_frames.resize(GIF_FRAME_COUNT);
+    g_gif_sampler = create_sampler();
 }
 
 // ---------------------------------------------------------------------------
@@ -2041,8 +2231,9 @@ void konanix::recreate_swap_chain() {
 // initialization and cleanup
 // ---------------------------------------------------------------------------
 
-void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug, const bool &resizable) {
+void konanix::initialize(const uint32_t gif_frame_count, const uint32_t &w, const uint32_t &h, const bool &debug, const bool &resizable) {
     logger::log("<konanix> Initializing renderer...");
+    GIF_FRAME_COUNT = gif_frame_count;
     globals::width = std::move(w);
     globals::height = std::move(h);
     DEBUG = debug;
@@ -2068,7 +2259,7 @@ void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug
     //create_texture_image_view(g_texture,VK_FORMAT_R8G8B8A8_SRGB,g_texture_image_view,1);
     //create_texture_sampler(g_texture_sampler);
 
-    create_gif_image(globals::width, globals::height);
+    // create_gif_image(0,globals::width, globals::height);
 
     create_descriptor_pool();
     create_descriptor_set_layout();
@@ -2085,17 +2276,17 @@ void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug
        logger::log("<konanix> GIF sampler destroyed!",logger::dbg);
     }
 
-    if (g_gif_image) {
-        vkDestroyImage(globals::device::device,g_gif_image,globals::allocator);
+    if (gif_frames[0].image) {
+        vkDestroyImage(globals::device::device,gif_frames[0].image,globals::allocator);
         logger::log("<konanix> GIF image destroyed!",logger::dbg);
     }
 
-    if (g_gif_image_view) {
-        vkDestroyImageView(globals::device::device,g_gif_image_view,globals::allocator);
+    if (gif_frames[0].image_view) {
+        vkDestroyImageView(globals::device::device,gif_frames[0].image_view,globals::allocator);
         logger::log("<konanix> GIF image view destroyed!",logger::dbg);
     }
 
-    vkFreeMemory(globals::device::device,g_gif_image_memory,globals::allocator);
+    vkFreeMemory(globals::device::device,gif_frames[0].image_memory,globals::allocator);
     logger::log("<konanix> GIF image memory freed up!",logger::dbg);
 
     logger::log("<konanix> Renderer initialized!");
@@ -2214,18 +2405,23 @@ void konanix::cleanup() {
        logger::log("<konanix> GIF sampler destroyed!",logger::dbg);
     }
 
-    if (g_gif_image) {
-        vkDestroyImage(globals::device::device,g_gif_image,globals::allocator);
-        logger::log("<konanix> GIF image destroyed!",logger::dbg);
-    }
+    logger::log("<konanix> Cleaning "+std::to_string(gif_frames.size())+" frames...",logger::dbg);
+    for (size_t i = 0; i < gif_frames.size(); ++i) {
+            
+        if (gif_frames[i].image) {
+            vkDestroyImage(globals::device::device,gif_frames[i].image,globals::allocator);
+            logger::log("<konanix> GIF image "+std::to_string(i)+"/"+std::to_string(gif_frames.size())+" destroyed!",logger::dbg);
+        }
+    
+        if (gif_frames[i].image_view) {
+            vkDestroyImageView(globals::device::device,gif_frames[i].image_view,globals::allocator);
+            logger::log("<konanix> GIF image view "+std::to_string(i)+"/"+std::to_string(gif_frames.size())+" destroyed!",logger::dbg);
+        }
+    
+        vkFreeMemory(globals::device::device,gif_frames[i].image_memory,globals::allocator);
+        logger::log("<konanix> GIF image memory "+std::to_string(i)+"/"+std::to_string(gif_frames.size())+" freed up!",logger::dbg);
 
-    if (g_gif_image_view) {
-        vkDestroyImageView(globals::device::device,g_gif_image_view,globals::allocator);
-        logger::log("<konanix> GIF image view destroyed!",logger::dbg);
     }
-
-    vkFreeMemory(globals::device::device,g_gif_image_memory,globals::allocator);
-    logger::log("<konanix> GIF image memory freed up!",logger::dbg);
 
     if (globals::device::device) {
         vkDestroyDevice(globals::device::device,nullptr);

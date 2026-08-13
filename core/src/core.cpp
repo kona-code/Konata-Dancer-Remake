@@ -249,10 +249,10 @@ void close_gif_from_memory(GifFileType *gif) {
 static GifAnimation load_gif_animation(const std::filesystem::path& path) {
     int err = 0;
     GifFileType* gif;
-    if (!path.empty())
-        gif = DGifOpenFileName(path.string().c_str(), &err);
-    else
-        gif = open_gif_from_memory(konata_bytecode, konata_bytecode_len, &err);
+
+    if (!path.empty()) gif = DGifOpenFileName(path.string().c_str(), &err);
+    else gif = open_gif_from_memory(konata_bytecode, konata_bytecode_len, &err);
+
     if (!gif) {
         logger::log("DGifOpenFileName failed for \""+path.string()+"\"! Exception details: "+std::to_string(err),logger::exc);
         throw std::runtime_error("DGifOpenFileName failed for: " + path.string() + " err=" + std::to_string(err));
@@ -401,21 +401,26 @@ int main(int argc, char *argv[]) {
     if (!path.empty()) stbi_load(path.c_str(),&iw,&ih,nullptr,STBI_rgb_alpha);
     else iw = 640; ih = 480;
 
-    logger::log("Creating window object...",logger::dbg);
+    logger::log("Loading animated GIF...", logger::dbg);
+    const GifAnimation anim = load_gif_animation(path);
+    konanix::image_size = iw*ih*STBI_rgb_alpha;
+    logger::log("Uploading animated GIF...", logger::dbg);
 
-    konanix::image_size = iw*ih*4;
+    konanix::initialize_gif_dependencies(anim.frames.size());
+    for (size_t i = 0; i < anim.frames.size(); ++i) {
+        konanix::create_gif_image(i, anim.width, anim.height);
+        stbi_image_free();
+        logger::log("Loaded frame "+std::to_string(i),logger::dbg);
+    }
+    // konanix::create_descriptor_set();
+    
     try {
-        konanix::initialize(iw, ih, debug, resizable);
+        konanix::initialize(anim.frames.size(),iw, ih, debug, resizable);
     } catch (std::exception &e) {
-        logger::log("Could not initialize Vulkan! Exception details: "+std::string(e.what()),logger::err);
+        logger::log("Could not initialize Vulkan backend! Exception details: "+std::string(e.what()),logger::err);
         exit(1);
     }
 
-    logger::log("Loading animated GIF...", logger::dbg);
-
-    const GifAnimation anim = load_gif_animation(path);
-    konanix::create_gif_image(anim.width, anim.height);
-    // konanix::create_descriptor_set();
     struct sigaction sigIntHandler {
         terminate_handler,
         {static_cast<unsigned long>(sigemptyset(&sigIntHandler.sa_mask))},
@@ -462,17 +467,17 @@ int main(int argc, char *argv[]) {
         const auto& src = anim.frames[frame_index].rgba;
         const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
         memcpy(overlay_buffer.data(), src.data(), copy_bytes);
-        ctx.rgba = overlay_buffer.data();
-
-        konanix::draw_context_menu(ctx);
-
-        konanix::upload_rgba_frame_to_gif_image(
-            ctx.rgba,
-            overlay_buffer.size(),
-            ctx.w,
-            ctx.h,
-            frame_index == 0
-        );
+        // ctx.rgba = overlay_buffer.data();
+        //
+        // konanix::draw_context_menu(ctx);
+        //
+        // konanix::upload_rgba_frame_to_gif_image(
+        //     ctx.rgba,
+        //     overlay_buffer.size(),
+        //     ctx.w,
+        //     ctx.h,
+        //     frame_index == 0
+        // );
         konanix::draw_frame(ctx.w,ctx.h);
         glfwPollEvents();
     }

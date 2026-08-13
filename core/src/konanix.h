@@ -41,13 +41,14 @@
 namespace konanix {
     inline bool g_swapchain_rebuild = false;
 
-    void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
+    void initialize(const uint32_t gif_frame_count, const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
     void render();
     void cleanup();
     void draw_frame(int width, int height);
 
-    void create_gif_image(uint32_t width, uint32_t height);
+    void create_gif_image(const char** pixels, const uint32_t &frame, uint32_t width, uint32_t height);
     void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload = false);
+    void initialize_gif_dependencies(const uint32_t &frame_count);
 
     struct Overlay {
         int w = 0;
