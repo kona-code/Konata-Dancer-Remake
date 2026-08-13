@@ -21,13 +21,16 @@
 //  Copyright © 2026 konacode. All rights reserved.
 
 #pragma once
+#include "core.h"
 
-class konacore {
-public:
-  konacore(const konacore &) = default;
-  konacore(konacore &&) = default;
-  konacore &operator=(const konacore &) = default;
-  konacore &operator=(konacore &&) = default;
-  constexpr static const char *project = "KonataDancerRemake";
-  constexpr static short version[3] = {2, 0, 0};
+namespace konanix::globals::uniform_buffer {
+
+// ---------------------------------------------------------------------------
+// uniform buffer object variable definitions
+// ---------------------------------------------------------------------------
+
+inline VkBuffer                     buffers             [MAX_FRAMES_IN_FLIGHT]{}; 
+inline VkDeviceMemory               memory              [MAX_FRAMES_IN_FLIGHT]{}; 
+inline void*                        memory_mapped       [MAX_FRAMES_IN_FLIGHT]{}; 
+
 };

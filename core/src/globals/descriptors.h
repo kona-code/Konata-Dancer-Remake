@@ -21,13 +21,22 @@
 //  Copyright © 2026 konacode. All rights reserved.
 
 #pragma once
+#include "core.h"
+#include <vector>
 
-class konacore {
-public:
-  konacore(const konacore &) = default;
-  konacore(konacore &&) = default;
-  konacore &operator=(const konacore &) = default;
-  konacore &operator=(konacore &&) = default;
-  constexpr static const char *project = "KonataDancerRemake";
-  constexpr static short version[3] = {2, 0, 0};
+namespace konanix::globals::descriptor {
+
+// ---------------------------------------------------------------------------
+// descriptor variable definitions
+// ---------------------------------------------------------------------------
+
+inline VkDescriptorPool             pool                        = nullptr;
+inline std::vector<VkDescriptorSet> sets                        {};
+inline VkDescriptorSetLayout        layout                      = nullptr;
+
+namespace material {
+    inline VkDescriptorPool         pool                        = nullptr;
+    inline VkDescriptorSetLayout    layout                      = nullptr;
+}
+
 };

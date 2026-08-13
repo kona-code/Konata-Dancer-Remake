@@ -21,13 +21,17 @@
 //  Copyright © 2026 konacode. All rights reserved.
 
 #pragma once
+#include <chrono>
 
-class konacore {
-public:
-  konacore(const konacore &) = default;
-  konacore(konacore &&) = default;
-  konacore &operator=(const konacore &) = default;
-  konacore &operator=(konacore &&) = default;
-  constexpr static const char *project = "KonataDancerRemake";
-  constexpr static short version[3] = {2, 0, 0};
+namespace konanix::globals::time {
+
+// ---------------------------------------------------------------------------
+// time variable definitions
+// ---------------------------------------------------------------------------
+
+static const std::chrono::time_point<std::chrono::high_resolution_clock, std::chrono::duration<long, std::ratio<1,1000000000>>> start = std::chrono::high_resolution_clock::now();
+inline std::chrono::time_point<std::chrono::high_resolution_clock, std::chrono::duration<long, std::ratio<1,1000000000>>>       last_frame;
+inline float delta_time;
+inline float elapsed {};
+
 };

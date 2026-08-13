@@ -21,13 +21,19 @@
 //  Copyright © 2026 konacode. All rights reserved.
 
 #pragma once
+#include "core.h"
+#include <vector>
 
-class konacore {
-public:
-  konacore(const konacore &) = default;
-  konacore(konacore &&) = default;
-  konacore &operator=(const konacore &) = default;
-  konacore &operator=(konacore &&) = default;
-  constexpr static const char *project = "KonataDancerRemake";
-  constexpr static short version[3] = {2, 0, 0};
+namespace konanix::globals::sync {
+
+// ---------------------------------------------------------------------------
+// sync object variable definitions
+// ---------------------------------------------------------------------------
+
+inline VkSemaphore                  image_available_semaphores      [MAX_FRAMES_IN_FLIGHT]{};
+inline std::vector<VkSemaphore>     render_finished_semaphores      {};
+inline VkFence                      in_flight_fences                [MAX_FRAMES_IN_FLIGHT]{};
+
+// stores an in_flight_fence for each image in globals::swapchain::images
+inline std::vector<VkFence>         images_in_flight                {};
 };

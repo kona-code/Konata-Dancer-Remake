@@ -21,13 +21,21 @@
 //  Copyright © 2026 konacode. All rights reserved.
 
 #pragma once
+#include <vulkan/vulkan.h>
+#define KONANIX_BUILD_WITH_VALIDATION
+static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
-class konacore {
-public:
-  konacore(const konacore &) = default;
-  konacore(konacore &&) = default;
-  konacore &operator=(const konacore &) = default;
-  konacore &operator=(konacore &&) = default;
-  constexpr static const char *project = "KonataDancerRemake";
-  constexpr static short version[3] = {2, 0, 0};
-};
+
+#ifdef KONANIX_BUILD_WITH_VALIDATION
+
+#define KONANIX_EXTENSIVE_LOGGING
+#define KONANIX_GRID_LINE_RENDERING
+
+
+#ifdef KONANIX_EXTENSIVE_LOGGING
+// #define KONANIX_CAMERA_POSITION_LOGGING
+// #define KONANIX_MOUSE_MOVEMENT_LOGGING
+// #define KONANIX_RUNTIME_OBJECT_LOGGING
+#endif
+
+#endif

@@ -22,12 +22,24 @@
 
 #pragma once
 
-class konacore {
-public:
-  konacore(const konacore &) = default;
-  konacore(konacore &&) = default;
-  konacore &operator=(const konacore &) = default;
-  konacore &operator=(konacore &&) = default;
-  constexpr static const char *project = "KonataDancerRemake";
-  constexpr static short version[3] = {2, 0, 0};
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif defined (__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#else
+#define GLFW_EXPOSE_NATIVE_X11
+#endif
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+
+namespace konanix::globals {
+
+// ---------------------------------------------------------------------------
+// window variable definition
+// ---------------------------------------------------------------------------
+
+inline GLFWwindow*                  window                      = nullptr;
+inline int                          width                       = 0;
+inline int                          height                      = 0;
 };

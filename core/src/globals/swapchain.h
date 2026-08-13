@@ -21,13 +21,22 @@
 //  Copyright © 2026 konacode. All rights reserved.
 
 #pragma once
+#include "core.h"
+#include <vector>
 
-class konacore {
-public:
-  konacore(const konacore &) = default;
-  konacore(konacore &&) = default;
-  konacore &operator=(const konacore &) = default;
-  konacore &operator=(konacore &&) = default;
-  constexpr static const char *project = "KonataDancerRemake";
-  constexpr static short version[3] = {2, 0, 0};
+namespace konanix::globals::swapchain {
+
+// ---------------------------------------------------------------------------
+// swapchain variable definitions
+// ---------------------------------------------------------------------------
+
+inline VkSwapchainKHR               swapchain                   = nullptr;
+inline std::vector<VkImage>         images            {};
+inline VkFormat                     format            {};
+inline VkExtent2D                   extent            {};
+inline std::vector<VkImageView>     image_views       {};
+inline std::vector<VkFramebuffer>   framebuffers      {};
+
+inline float aspect_ratio() { return static_cast<float>(extent.width) / static_cast<float>(extent.height); }
+
 };
