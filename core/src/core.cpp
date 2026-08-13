@@ -42,6 +42,8 @@
 
 #include <gif_lib.h>
 
+#include "globals/window.h"
+
 // #define STB_ONLY_GIF
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_THREAD_LOCALS
@@ -413,7 +415,7 @@ int main(int argc, char *argv[]) {
 
     const GifAnimation anim = load_gif_animation(path);
     konanix::create_gif_image(anim.width, anim.height);
-    konanix::create_descriptor_set();
+    // konanix::create_descriptor_set();
     struct sigaction sigIntHandler {
         terminate_handler,
         {static_cast<unsigned long>(sigemptyset(&sigIntHandler.sa_mask))},
@@ -428,7 +430,7 @@ int main(int argc, char *argv[]) {
     int outdatedw = iw, outdatedh = ih;
     logger::log("Initialized!");
     logger::log("Started rendering loop!");
-    while (!glfwWindowShouldClose(konanix::g_window)) {
+    while (!glfwWindowShouldClose(konanix::globals::window)) {
         // const auto now = std::chrono::steady_clock::now();
         // if (now >= next_frame_time) {
         std::this_thread::sleep_for(std::chrono::milliseconds(anim.frames[frame_index].delay_ms));
@@ -443,7 +445,7 @@ int main(int argc, char *argv[]) {
             // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
         // }
 
-        glfwGetFramebufferSize(konanix::g_window, &ctx.w, &ctx.h);
+        glfwGetFramebufferSize(konanix::globals::window, &ctx.w, &ctx.h);
             
         if (outdatedw != ctx.w || outdatedh != ctx.h) {
             konanix::recreate_swap_chain();

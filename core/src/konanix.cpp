@@ -50,7 +50,6 @@
 #include "globals/swapchain.h"
 #include "globals/pipeline.h"
 #include "globals/sync.h"
-#include "globals/uniform_buffer.h"
 #include "globals/time.h"
 
 #include "./shaders/frag.c"
@@ -60,7 +59,6 @@ using namespace konanix;
 
 static constexpr short                  version[3]                      = {1, 0, 0};
 static uint32_t                         current_frame = 1;
-static int                              width, height;
 
 static VkImage                          g_gif_image                     = nullptr;
 static VkDeviceMemory                   g_gif_image_memory              = nullptr;
@@ -73,8 +71,10 @@ static bool                             RESIZABLE                       = false;
 static const char**                     exts;
 static uint32_t                         n_exts                          = 0;
 
+static VkSampleCountFlagBits            g_msaa_samples                  = VK_SAMPLE_COUNT_1_BIT;
+
 #ifdef KONANIX_BUILD_WITH_VALIDATION
-static VkDebugUtilsMessengerEXT         g_debug_messenger           = nullptr;
+static VkDebugUtilsMessengerEXT         g_debug_messenger               = nullptr;
 
 constexpr static VKAPI_ATTR VkBool32 VKAPI_CALL validation_callback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
     switch (messageSeverity) {
@@ -625,6 +625,19 @@ static uint32_t find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags prop
     throw std::runtime_error("failed to find suitable memory type");
 }
 
+static uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties, VkPhysicalDevice device) {
+    VkPhysicalDeviceMemoryProperties mem_properties {};
+    vkGetPhysicalDeviceMemoryProperties(device,&mem_properties);
+
+    for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
+        if ((type_filter & (1u << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+    logger::log("Failed to find a suitable memory type!",logger::exc);
+    throw std::runtime_error("failed to find a suitable memory type");
+}
+
 static void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &buffer_memory) {
     VkBufferCreateInfo buffer_info {
         VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -675,11 +688,11 @@ static void framebuffer_resize_callback(GLFWwindow* window, int width, int heigh
 // create a GLFW window and store the global instance
 static void create_window() {
     logger::log("<konanix> Creating window instance...",logger::dbg);
+
     if (!glfwInit()) {
         logger::log("<konanix> Could not initialize GLFW!",logger::exc);
         throw std::runtime_error("failed to initialize glfw3");
     }
-
 
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
     glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
@@ -695,6 +708,8 @@ static void create_window() {
     glfwWindowHint(GLFW_REFRESH_RATE,m_properties->refreshRate);
     logger::log("<konanix> Window will be capped at "+std::to_string(m_properties->refreshRate)+" FPS.",logger::dbg);
 
+    glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
+
     globals::window = glfwCreateWindow(globals::width,globals::height,"Konata Dancer Remake",nullptr,nullptr);
 
     if (!globals::window) {
@@ -702,11 +717,13 @@ static void create_window() {
         glfwTerminate();
         throw std::runtime_error("failed to create a glfw window");
     }
+
     g_menu.items = {
         {"OPEN",[]{}},
-        {"CLOSE",[]{glfwSetWindowShouldClose(g_window,GLFW_TRUE);}},
+        {"CLOSE",[]{glfwSetWindowShouldClose(globals::window,GLFW_TRUE);}},
     };
 
+    exts = glfwGetRequiredInstanceExtensions(&n_exts);
     glfwSetWindowSize(globals::window,globals::width,globals::height);
     glfwSetFramebufferSizeCallback(globals::window,framebuffer_resize_callback);
     glfwSetCursorPosCallback(globals::window, cursor_pos_callback);
@@ -984,14 +1001,115 @@ static void create_image_views() {
     }
 }
 
-static void update_descriptor_set() {
-    //const VkDescriptorImageInfo image_info {
-    //    g_sampler,
-    //    globals::swapchain::image_views[current_frame],
-    //    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    //};
+// ---------------------------------------------------------------------------
+// descriptor functions
+// ---------------------------------------------------------------------------
 
-    // std::array<VkDescriptorBufferInfo,MAX_FRAMES_IN_FLIGHT> desc_buffer_infos;
+static void create_descriptor_pool() {
+    constexpr VkDescriptorPoolSize pool_size {
+            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) /*4*/
+        };
+
+    const VkDescriptorPoolCreateInfo pool_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+
+        .maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) /*4*/,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size
+    };
+
+    if (vkCreateDescriptorPool(globals::device::device, &pool_info, nullptr, &globals::descriptor::pool) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to create the descriptor pool!",logger::exc);
+        throw std::runtime_error("failed to create descriptor pool");
+    }
+
+    logger::log("<konanix> Descriptor pool created!",logger::dbg);
+}
+
+void konanix::create_descriptor_set() {
+    const static std::array<VkDescriptorSetLayout,MAX_FRAMES_IN_FLIGHT /*4*/> layouts({
+            // globals::descriptor::layout,
+            // globals::descriptor::layout,
+            globals::descriptor::layout,
+            globals::descriptor::layout
+    });
+
+    const VkDescriptorSetAllocateInfo alloc_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = nullptr,
+        
+        .descriptorPool = globals::descriptor::pool,
+        .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
+        .pSetLayouts = layouts.data()
+    };
+
+    globals::descriptor::sets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(globals::device::device, &alloc_info, globals::descriptor::sets.data()) != VK_SUCCESS) {
+        logger::log("<konanix> Unable to allocate descriptor sets!",logger::exc);
+        throw std::runtime_error("vkAllocateDescriptorSets failed!");
+    }
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        const VkDescriptorImageInfo image_info{
+            g_gif_sampler,
+            g_gif_image_view,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        };
+
+        const VkWriteDescriptorSet descriptor_write {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext = nullptr,
+                
+                .dstSet = globals::descriptor::sets[i],
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .pImageInfo = &image_info,
+                .pBufferInfo = nullptr,
+                .pTexelBufferView = nullptr
+        };
+
+        vkUpdateDescriptorSets(globals::device::device, 1, &descriptor_write, 0, nullptr);
+
+    }
+    logger::log("<konanix> Descriptor sets created!",logger::dbg);
+}
+
+static void create_descriptor_set_layout() {
+     constexpr VkDescriptorSetLayoutBinding gif_binding {
+        0,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+     };
+     
+#ifdef KONANIX_BUILD_WITH_VALIDATION
+    logger::log("<konanix> Descriptor set binding is of type "+std::to_string(gif_binding.descriptorType)+" with count "+std::to_string(gif_binding.descriptorCount),logger::dbg);
+#endif
+    const VkDescriptorSetLayoutCreateInfo layout_info {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .bindingCount = 1,
+        .pBindings = &gif_binding
+    };
+
+    if (vkCreateDescriptorSetLayout(globals::device::device,&layout_info,globals::allocator,&globals::descriptor::layout) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to create global descriptor set layout!",logger::exc);
+        throw std::runtime_error("failed to create global descriptor set layout!");
+    }
+
+    logger::log("<konanix> Descriptor set layout created!",logger::dbg);
+}
+
+
+
+static void update_descriptor_set() {
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         const VkDescriptorImageInfo image_info {
@@ -1008,7 +1126,7 @@ static void update_descriptor_set() {
             .dstBinding = 0,
             .dstArrayElement = 0,
             .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &image_info,
             .pBufferInfo = nullptr,
             .pTexelBufferView = nullptr
@@ -1020,266 +1138,54 @@ static void update_descriptor_set() {
     logger::log("<konanix> Descriptor sets updated!",logger::dbg);
 }
 
-
-
-static void create_graphics_pipeline() {
-    logger::log("<Vulkan> Creating the graphics pipeline...",logger::dbg);
-
-    // VkShaderModule v_shadermodule = create_shader_module(globals::device::device,read_file("shaders/vert.spv"));
-    // VkShaderModule f_shadermodule = create_shader_module(globals::device::device,read_file("shaders/frag.spv"));
-
-    const VkShaderModuleCreateInfo vertex_info {
-        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        vert_spv_len,
-        reinterpret_cast<const uint32_t*>(vert_spv)
-    };
-
-    VkShaderModule vertex_shader;
-    if (vkCreateShaderModule(globals::device::device, &vertex_info, nullptr, &vertex_shader)) {
-        logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
-        throw std::runtime_error("failed to create a shader module");
-    }
-
-    const VkShaderModuleCreateInfo fragment_info {
-        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        frag_spv_len,
-        reinterpret_cast<const uint32_t*>(frag_spv)
-    };
-
-    VkShaderModule fragment_shader;
-    if (vkCreateShaderModule(globals::device::device, &fragment_info, nullptr, &fragment_shader)) {
-        logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
-        throw std::runtime_error("failed to create a shader module");
-    }
-
-        VkPipelineShaderStageCreateInfo v_shader_info{};
-        v_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        v_shader_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
-        v_shader_info.module = vertex_shader;
-        v_shader_info.pName = "main";
-
-        VkPipelineShaderStageCreateInfo f_shader_info{};
-        f_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        f_shader_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        f_shader_info.module = fragment_shader;
-        f_shader_info.pName = "main";
-
-
-    const VkPipelineShaderStageCreateInfo shader_stages[2] = {v_shader_info,f_shader_info};
-    logger::log("<Vulkan> Pipeline shader stages set!",logger::dbg);
-    
-    const std::vector<VkDynamicState> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    const VkPipelineDynamicStateCreateInfo dynamic_state {
-        VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        static_cast<uint32_t>(dynamic_states.size()),
-        dynamic_states.data()
-    };
-
-    const VkPipelineVertexInputStateCreateInfo vertex_input_info {
-        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        0,
-        nullptr,
-        0,
-        nullptr
-    };
-
-    constexpr VkPipelineInputAssemblyStateCreateInfo input_assembly_state_info {
-        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        
-        // from https://vulkan-tutorial.com/en/Drawing_a_triangle/Graphics_pipeline_basics/Fixed_functions
-        // VK_PRIMITIVE_TOPOLOGY_POINT_LIST,        // points from vertices
-        // VK_PRIMITIVE_TOPOLOGY_LINE_LIST,         // line from every 2 vertices without reuse
-        // VK_PRIMITIVE_TOPOLOGY_LINE_STRIP,        // the end vertex of every line is used as start vertex for the next line
-        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,        // triangle from every 3 vertices without reuse
-        // VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,    // the second and third vertex of every triangle are used as first two vertices of the next triangle
-
-        VK_FALSE
-    };
-
-    const VkViewport viewport {
-        0.0f,
-        0.0f,
-        (float) globals::swapchain::extent.width,
-        (float) globals::swapchain::extent.height,
-        0.0f,
-        1.0f
-    };
-
-    const VkRect2D scissor {
-        {0,0},
-        globals::swapchain::extent
-    };
-
-    const VkPipelineViewportStateCreateInfo viewport_state_info {
-        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        
-        1,
-        &viewport,
-        
-        1,
-        &scissor
-    };
-
-
-    const VkPipelineRasterizationStateCreateInfo rasterizer {
-        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        VK_FALSE,VK_FALSE,
-        VK_POLYGON_MODE_FILL,
-        0,
-        VK_FRONT_FACE_CLOCKWISE,
-        VK_FALSE,
-        1.0f,
-        0.0f,
-        0.0f,
-        1.0f
-    };
-
-
-    constexpr VkPipelineMultisampleStateCreateInfo multisampling {
-        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        VK_SAMPLE_COUNT_1_BIT,
-        VK_FALSE,
-        1.0f,
-        nullptr,
-        VK_FALSE,
-        VK_FALSE
-    };
-
-
-    constexpr VkPipelineColorBlendAttachmentState color_blend_attachment {
-        VK_TRUE,
-        VK_BLEND_FACTOR_SRC_ALPHA,
-        VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        VK_BLEND_OP_ADD,
-        // VK_FALSE,
-        // VK_BLEND_FACTOR_ONE,
-        // VK_BLEND_FACTOR_ZERO,
-        // VK_BLEND_OP_ADD,
-
-        VK_BLEND_FACTOR_ONE,
-        VK_BLEND_FACTOR_ZERO,
-        VK_BLEND_OP_ADD,
-
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
-    }; 
-
-    const VkPipelineColorBlendStateCreateInfo color_blending {
-        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-
-        VK_FALSE,
-        VK_LOGIC_OP_COPY,
-        1,
-        &color_blend_attachment,
-        
-        {
-            0.0f, 0.0f, 0.0f, 0.0f
-        }
-    };
-
-    const VkPipelineLayoutCreateInfo pipeline_layout_info {
-        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-
-        // 0,
-        // nullptr,
-        1,
-        &g_descriptor_set_layout,
-        0,
-        nullptr
-    };
-
-    if (vkCreatePipelineLayout(globals::device::device,&pipeline_layout_info,nullptr,&g_pipeline_layout) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed to create the pipeline layout!",logger::exc);
-        throw std::runtime_error("failed to create the pipeline layout");
-    }
-
-    logger::log("<Vulkan> Creating graphics pipeline object...",logger::dbg);
-
-    const VkGraphicsPipelineCreateInfo pipeline_info {
-        VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-
-        2,
-        shader_stages,
-        &vertex_input_info,
-        &input_assembly_state_info,
-        VK_NULL_HANDLE,
-        &viewport_state_info,
-        &rasterizer,
-        &multisampling,
-        nullptr,
-        &color_blending,
-        &dynamic_state,
-
-        g_pipeline_layout,
-        g_renderpass,
-        0,
-
-        VK_NULL_HANDLE,
-        -1
-    };
-
-    if (vkCreateGraphicsPipelines(globals::device::device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &g_graphics_pipeline) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed to create the graphics pipeline!",logger::exc);
-        throw std::runtime_error("failed to create the graphics pipeline");
-    }
-
-    logger::log("<Vulkan> Graphics pipeline created! Cleaning shader data...",logger::dbg);
-    // vkDestroyShaderModule(globals::device::device,v_shadermodule,nullptr);
-    // vkDestroyShaderModule(globals::device::device,f_shadermodule,nullptr);
-    vkDestroyShaderModule(globals::device::device,fragment_shader,nullptr);
-    vkDestroyShaderModule(globals::device::device,vertex_shader,nullptr);
-
-    logger::log("<Vulkan> Graphics pipeline created!",logger::dbg);
-}
+// ---------------------------------------------------------------------------
+// fixed functions
+// ---------------------------------------------------------------------------
 
 static void create_render_pass() {
-    logger::log("<Vulkan> Creating the render pass...",logger::dbg);
+    logger::log("<konanix> Creating the render pass...",logger::dbg);
     // comments from https://vulkan-tutorial.com/en/Drawing_a_triangle/Graphics_pipeline_basics/Render_passes
     const VkAttachmentDescription color_attachment {
-        0,
-        globals::swapchain::swapchain_image_format,
-        VK_SAMPLE_COUNT_1_BIT,
-        VK_ATTACHMENT_LOAD_OP_CLEAR,
-        VK_ATTACHMENT_STORE_OP_STORE,
+        .flags = 0,
+        .format = globals::swapchain::format,
+        .samples = g_msaa_samples,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 
-        // VK_ATTACHMENT_LOAD_OP_LOAD,          // Preserve the existing contents of the attachment
-        // VK_ATTACHMENT_LOAD_OP_CLEAR,         // Clear the values to a constant at the start
-        VK_ATTACHMENT_LOAD_OP_DONT_CARE,     // Existing contents are undefined; don't care about them
+        // VK_ATTACHMENT_LOAD_OP_LOAD,                              // Preserve the existing contents of the attachment
+        // VK_ATTACHMENT_LOAD_OP_CLEAR,                             // Clear the values to a constant at the start
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,           // Existing contents are undefined; don't care about them
 
-        // VK_ATTACHMENT_STORE_OP_STORE,        // Rendered contents will be stored in memory and can be read later
-        VK_ATTACHMENT_STORE_OP_DONT_CARE,    // Contents of the framebuffer will be undefined after the rendering operation
+        // VK_ATTACHMENT_STORE_OP_STORE,                            // Rendered contents will be stored in memory and can be read later
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,         // Contents of the framebuffer will be undefined after the rendering operation
 
-        VK_IMAGE_LAYOUT_UNDEFINED,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 
-        // VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,    // Images used as color attachment
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR             // Images to be presented in the swap chain
-        // VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,        // Images to be used as destination for a memory copy operation
+        .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL     // Images used as color attachment
+        // .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR           // Images to be presented in the swap chain
+        // VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,                    // Images to be used as destination for a memory copy operation
+    };
+
+    const VkAttachmentDescription color_attachment_resolve {    // due to .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        .flags =0,
+
+        .format = globals::swapchain::format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+
+        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
     };
 
     constexpr VkAttachmentReference color_attachment_ref {
-        0,
-        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
     };
 
     // for later:
@@ -1291,79 +1197,317 @@ static void create_render_pass() {
     // pPreserveAttachments: Attachments that are not used by this subpass, but for which the data must be preserved
 
     const VkSubpassDescription subpass {
-        0,
+        .flags = 0,
 
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        0,
-        VK_NULL_HANDLE,
-        1,
-        &color_attachment_ref
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+
+        .inputAttachmentCount = 0,
+        .pInputAttachments = nullptr,
+
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_attachment_ref,
+        .pResolveAttachments = nullptr,
+        .pDepthStencilAttachment = nullptr 
     };
 
     constexpr VkSubpassDependency dependency {
-        VK_SUBPASS_EXTERNAL,
-        0,
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
 
-
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
 
         // VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, // .srcAccessMask
-        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
     };
 
     const VkRenderPassCreateInfo renderpass_info {
-        VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
 
-        1,
-        &color_attachment,
+        .attachmentCount = 1,
+        .pAttachments = &color_attachment,
 
-        1,
-        &subpass,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
 
-        1,
-        &dependency
+        .dependencyCount = 1,
+        .pDependencies = &dependency
     };
 
-    if (vkCreateRenderPass(globals::device::device, &renderpass_info, nullptr, &g_renderpass) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed to create render pass!",logger::exc);
+    if (vkCreateRenderPass(globals::device::device, &renderpass_info, nullptr, &globals::pipeline::renderpass) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to create render pass!",logger::exc);
         throw std::runtime_error("failed to create render pass");
     }
 
-    logger::log("<Vulkan> Render pass created!",logger::dbg);
+    logger::log("<konanix> Render pass created!",logger::dbg);
+}
+
+static void create_graphics_pipeline() {
+    logger::log("<konanix> Creating the graphics pipeline...",logger::dbg);
+
+    // VkShaderModule v_shadermodule = create_shader_module(globals::device::device,read_file("shaders/vert.spv"));
+    // VkShaderModule f_shadermodule = create_shader_module(globals::device::device,read_file("shaders/frag.spv"));
+
+    const VkShaderModuleCreateInfo vertex_info {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .codeSize = vert_spv_len,
+        .pCode = reinterpret_cast<const uint32_t*>(vert_spv)
+    };
+
+    VkShaderModule vertex_shader;
+        if (vkCreateShaderModule(globals::device::device, &vertex_info, nullptr, &vertex_shader)) {
+        logger::log("<konanix> Failed to create the vertex shader module!",logger::exc);
+        throw std::runtime_error("failed to create a shader module");
+    }
+
+    const VkShaderModuleCreateInfo fragment_info {
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        nullptr,
+        0,
+        frag_spv_len,
+        reinterpret_cast<const uint32_t*>(frag_spv)
+    };
+
+    VkShaderModule fragment_shader;
+    if (vkCreateShaderModule(globals::device::device, &fragment_info, nullptr, &fragment_shader)) {
+        logger::log("<konanix> Failed to create the fragment shader module!",logger::exc);
+        throw std::runtime_error("failed to create a shader module");
+    }
+
+     VkPipelineShaderStageCreateInfo v_shader_info{};
+     v_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+     v_shader_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+     v_shader_info.module = vertex_shader;
+     v_shader_info.pName = "main";
+
+     VkPipelineShaderStageCreateInfo f_shader_info{};
+     f_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+     f_shader_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+     f_shader_info.module = fragment_shader;
+     f_shader_info.pName = "main";
+
+    const VkPipelineShaderStageCreateInfo shader_stages[] = {v_shader_info,f_shader_info};
+    logger::log("<konanix> Pipeline shader stages set!",logger::dbg);
+    
+    const std::vector<VkDynamicState> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR/*, VK_DYNAMIC_STATE_LINE_WIDTH*/};
+    const VkPipelineDynamicStateCreateInfo dynamic_state {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+
+        .dynamicStateCount = static_cast<uint32_t>(dynamic_states.size()),
+        .pDynamicStates = dynamic_states.data()
+    };
+
+    const VkPipelineVertexInputStateCreateInfo vertex_input_info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        
+        .vertexBindingDescriptionCount = 0,
+        .pVertexBindingDescriptions = nullptr,
+
+        .vertexAttributeDescriptionCount = 0, 
+        .pVertexAttributeDescriptions = nullptr
+    };
+
+    constexpr VkPipelineInputAssemblyStateCreateInfo input_assembly_state_info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        
+        // from https://vulkan-tutorial.com/en/Drawing_a_triangle/Graphics_pipeline_basics/Fixed_functions
+        // VK_PRIMITIVE_TOPOLOGY_POINT_LIST,        // points from vertices
+        // VK_PRIMITIVE_TOPOLOGY_LINE_LIST,         // line from every 2 vertices without reuse
+        // VK_PRIMITIVE_TOPOLOGY_LINE_STRIP,        // the end vertex of every line is used as start vertex for the next line
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,        // triangle from every 3 vertices without reuse
+        // VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,    // the second and third vertex of every triangle are used as first two vertices of the next triangle
+
+        .primitiveRestartEnable = VK_FALSE
+    };
+
+    const VkViewport viewport {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width = (float) globals::swapchain::extent.width,
+        .height = (float) globals::swapchain::extent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+
+    const VkRect2D scissor {
+        .offset = {0,0},
+        .extent = globals::swapchain::extent
+    };
+
+    const VkPipelineViewportStateCreateInfo viewport_state_info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        
+        .scissorCount = 1,
+        .pScissors = &scissor
+    };
+
+
+    const VkPipelineRasterizationStateCreateInfo rasterizer {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+
+        .depthClampEnable = VK_FALSE,
+        .rasterizerDiscardEnable = VK_FALSE,
+        
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+
+        .depthBiasEnable = VK_FALSE,
+        .depthBiasConstantFactor = 1.0f,
+        .depthBiasClamp = 0.0f,
+        .depthBiasSlopeFactor = 0.0f,
+        .lineWidth = 1.0f
+    };
+
+
+    const VkPipelineMultisampleStateCreateInfo multisampling {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .rasterizationSamples = g_msaa_samples,
+        .sampleShadingEnable = VK_TRUE,
+        .minSampleShading = 0.2f,
+        .pSampleMask = nullptr,
+        .alphaToCoverageEnable = VK_FALSE,
+        .alphaToOneEnable = VK_FALSE
+    };
+
+
+    constexpr VkPipelineColorBlendAttachmentState color_blend_attachment {
+        .blendEnable = VK_TRUE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        // VK_FALSE,
+        // VK_BLEND_FACTOR_ONE,
+        // VK_BLEND_FACTOR_ZERO,
+        // VK_BLEND_OP_ADD,
+
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+    }; 
+
+    const VkPipelineColorBlendStateCreateInfo color_blending {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+
+        .logicOpEnable = VK_FALSE,
+        .logicOp = VK_LOGIC_OP_COPY,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend_attachment,
+        
+        .blendConstants = {
+            0.0f, 0.0f, 0.0f, 0.0f
+        }
+    };
+
+    const VkPipelineLayoutCreateInfo pipeline_layout_info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+
+        // 0,
+        // nullptr,
+        .setLayoutCount = 1,
+        .pSetLayouts = &globals::descriptor::layout,
+        .pushConstantRangeCount = 0,
+        .pPushConstantRanges = nullptr
+    };
+
+    if (vkCreatePipelineLayout(globals::device::device,&pipeline_layout_info,nullptr,&/*g_pipeline_layout*/ globals::pipeline::graphics_pipeline_layout) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to create the pipeline layout!",logger::exc);
+        throw std::runtime_error("failed to create the pipeline layout");
+    }
+
+    logger::log("<konanix> Creating graphics pipeline object...",logger::dbg);
+
+    const VkGraphicsPipelineCreateInfo pipeline_info {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+
+        .stageCount = 2,
+        .pStages = shader_stages,
+        .pVertexInputState = &vertex_input_info,
+        .pInputAssemblyState = &input_assembly_state_info,
+        .pTessellationState = nullptr,
+        .pViewportState = &viewport_state_info,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pDepthStencilState = nullptr, // &depth_stencil, // not used with single object
+        .pColorBlendState = &color_blending,
+        .pDynamicState = &dynamic_state,
+
+        /*g_pipeline_layout*/ 
+        .layout = globals::pipeline::graphics_pipeline_layout,
+        .renderPass = globals::pipeline::renderpass,
+        .subpass = 0,
+
+        .basePipelineHandle = nullptr,
+        .basePipelineIndex = -1
+    };
+
+    if (vkCreateGraphicsPipelines(globals::device::device, nullptr, 1, &pipeline_info, nullptr, &globals::pipeline::graphics_pipeline) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to create the graphics pipeline!",logger::exc);
+        throw std::runtime_error("failed to create the graphics pipeline");
+    }
+
+    logger::log("<konanix> Graphics pipeline created! Cleaning shader data...",logger::dbg);
+    // vkDestroyShaderModule(globals::device::device,v_shadermodule,nullptr);
+    // vkDestroyShaderModule(globals::device::device,f_shadermodule,nullptr);
+    vkDestroyShaderModule(globals::device::device,fragment_shader,nullptr);
+    vkDestroyShaderModule(globals::device::device,vertex_shader,nullptr);
+
+    logger::log("<konanix> Graphics pipeline created!",logger::dbg);
 }
 
 static void create_framebuffers() {
-    globals::swapchain::swapchain_framebuffers.resize(globals::swapchain::image_views.size());
+    globals::swapchain::framebuffers.resize(globals::swapchain::image_views.size());
 
-    for (size_t i = 0; i < globals::swapchain::swapchain_image_views.size(); i++) {
-        const VkImageView attachments[] = {
-            globals::swapchain::swapchain_image_views[i]
-        };
+    for (size_t i = 0; i < globals::swapchain::image_views.size(); ++i) {
 
         const VkFramebufferCreateInfo framebuffer_info {
-            VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-            VK_NULL_HANDLE,
-            0,
-            g_renderpass,
-            1,
-            attachments,
-            globals::swapchain::swapchain_extent.width,
-            globals::swapchain::swapchain_extent.height,
-            1
+            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+
+            .renderPass = globals::pipeline::renderpass,
+            .attachmentCount = 1,
+            .pAttachments = &globals::swapchain::image_views[i],
+            .width = globals::swapchain::extent.width,
+            .height = globals::swapchain::extent.height,
+            .layers = 1
         };
 
-        if (vkCreateFramebuffer(globals::device::device, &framebuffer_info, nullptr, &globals::swapchain::swapchain_framebuffers[i]) != VK_SUCCESS) {
-            logger::log("<Vulkan> Failed to a framebuffer!",logger::exc);
+        if (vkCreateFramebuffer(globals::device::device, &framebuffer_info, nullptr, &globals::swapchain::framebuffers[i]) != VK_SUCCESS) {
+            logger::log("<konanix> Failed to a framebuffer!",logger::exc);
             throw std::runtime_error("failed to create a framebuffer");
         }
     }
 }
-
-
 
 static void create_command_pool() {
     logger::log("<konanix> Creating command pool...",logger::dbg);
@@ -1380,7 +1524,7 @@ static void create_command_pool() {
         .queueFamilyIndex = qfi.graphicsFamily.value()
     };
 
-    if (vkCreateCommandPool(globals::device::device,&pool_info,nullptr,&g_commandpool) != VK_SUCCESS) {
+    if (vkCreateCommandPool(globals::device::device,&pool_info,nullptr,&globals::command::pool) != VK_SUCCESS) {
             logger::log("<konanix> Failed to the command pool!",logger::exc);
             throw std::runtime_error("failed to create command pool");
     }
@@ -1388,158 +1532,9 @@ static void create_command_pool() {
 
 }
 
-static void create_command_buffers() {
-    logger::log("<konanix> Allocating command buffer...",logger::dbg);
-    g_commandbuffers.resize(MAX_FRAMES_IN_FLIGHT);
-
-    const VkCommandBufferAllocateInfo alloc_info {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .pNext = nullptr,
-        
-        .commandPool = g_commandpool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = (uint32_t) g_commandbuffers.size()
-    };
-
-    if (vkAllocateCommandBuffers(globals::device::device,&alloc_info,g_commandbuffers.data()) != VK_SUCCESS) {
-            logger::log("<konanix> Failed to allocate the command buffer!",logger::exc);
-            throw std::runtime_error("failed to allocate command buffer");
-    }
-
-    logger::log("<konanix> Command buffer allocated successfully!",logger::dbg);
-
-}
-
-void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index) {
-    VkCommandBufferBeginInfo begin_info{
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        nullptr,
-        0,
-        nullptr
-    };
-
-    if (vkBeginCommandBuffer(commandbuffer, &begin_info) != VK_SUCCESS) {
-        throw std::runtime_error("failed to begin recording command buffer");
-    }
-
-    VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 0.0f}}};
-
-    VkRenderPassBeginInfo renderpass_info{
-        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        nullptr,
-        g_renderpass,
-        globals::swapchain::swapchain_framebuffers[image_index],
-        {{0, 0}, globals::swapchain::swapchain_extent},
-        1,
-        &clear_color
-    };
-
-    vkCmdBeginRenderPass(commandbuffer, &renderpass_info, VK_SUBPASS_CONTENTS_INLINE);
-
-    vkCmdBindPipeline(commandbuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, g_graphics_pipeline);
-
-    const VkViewport viewport{
-        0.0f, 0.0f,
-        static_cast<float>(globals::swapchain::swapchain_extent.width),
-        static_cast<float>(globals::swapchain::swapchain_extent.height),
-        0.0f, 1.0f
-    };
-    vkCmdSetViewport(commandbuffer, 0, 1, &viewport);
-
-    VkRect2D scissor{{0, 0}, globals::swapchain::swapchain_extent};
-    vkCmdSetScissor(commandbuffer, 0, 1, &scissor);
-
-    vkCmdBindDescriptorSets(
-        commandbuffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        g_pipeline_layout,
-        0,
-        1,
-        &g_descriptor_set,
-        0,
-        nullptr
-    );
-
-    vkCmdDraw(commandbuffer, 3, 1, 0, 0);
-
-    vkCmdEndRenderPass(commandbuffer);
-
-    if (vkEndCommandBuffer(commandbuffer) != VK_SUCCESS) {
-        throw std::runtime_error("failed to record command buffer");
-    }
-}
-
-static void create_sync_objects() {
-    g_image_available_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
-    g_render_finished_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
-    g_in_flight_fences.resize(MAX_FRAMES_IN_FLIGHT);
-
-    constexpr VkSemaphoreCreateInfo semaphore_info {
-        VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0
-    };
-
-    constexpr VkFenceCreateInfo fence_info {
-        VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        VK_NULL_HANDLE,
-        VK_FENCE_CREATE_SIGNALED_BIT
-    };
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (vkCreateSemaphore(globals::device::device,&semaphore_info,nullptr,&g_image_available_semaphores[i]) != VK_SUCCESS) {
-            logger::log("<Vulkan> Failed create a semaphore!",logger::exc);
-            throw std::runtime_error("failed to create a semaphore");
-        }    
-        if (vkCreateSemaphore(globals::device::device,&semaphore_info,nullptr,&g_render_finished_semaphores[i]) != VK_SUCCESS) {
-            logger::log("<Vulkan> Failed create a semaphore!",logger::exc);
-            throw std::runtime_error("failed to create a semaphore");
-        }    
-
-        if (vkCreateFence(globals::device::device,&fence_info,nullptr,&g_in_flight_fences[i]) != VK_SUCCESS) {
-            logger::log("<Vulkan> Failed create a fance!",logger::exc);
-            throw std::runtime_error("failed to create a fence");
-        }
-    } 
-}
-
-void konanix::recreate_swap_chain() {
-    logger::log("Recreating swap chain...",logger::dbg);
-    vkDeviceWaitIdle(globals::device::device);
-
-    for (VkFramebuffer f : globals::swapchain::swapchain_framebuffers)
-        vkDestroyFramebuffer(globals::device::device, f, nullptr);
-
-    for (VkImageView iw : globals::swapchain::swapchain_image_views)
-        vkDestroyImageView(globals::device::device, iw, nullptr);
-    
-    vkDestroyImage(globals::device::device,g_gif_image,nullptr);
-    vkDestroyImageView(globals::device::device, g_gif_image_view, nullptr);
-    vkDestroySampler(globals::device::device,g_gif_sampler,nullptr);
-    
-    vkDestroySwapchainKHR(globals::device::device, globals::swapchain::swapchain, nullptr);
-
-    create_swap_chain();
-    create_image_views();
-    create_gif_image(width, height);
-    update_descriptor_set();
-    create_framebuffers();
-
-    logger::log("Swap chain recreated!",logger::dbg);
-}
-
-static uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties, VkPhysicalDevice device) {
-    VkPhysicalDeviceMemoryProperties mem_properties {};
-    vkGetPhysicalDeviceMemoryProperties(device,&mem_properties);
-
-    for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
-        if ((type_filter & (1u << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
-    }
-    logger::log("Failed to find a suitable memory type!",logger::exc);
-    throw std::runtime_error("failed to find a suitable memory type");
-}
+// ---------------------------------------------------------------------------
+// image-based functions
+// ---------------------------------------------------------------------------
 
 void konanix::create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                             VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory) {
@@ -1660,164 +1655,69 @@ VkSampler konanix::create_sampler() {
     return sampler;
 }
 
-static void create_descriptor_pool() {
-    std::array<VkDescriptorPoolSize, 1> pool_sizes{{
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 }
-    }};
+static void create_image_views(const std::vector<VkImage> &images, const VkFormat format, std::vector<VkImageView> &image_views, const VkImageAspectFlagBits aspect_flags = VK_IMAGE_ASPECT_COLOR_BIT) {
+    image_views.resize(images.size());
+    for (size_t i = 0; i < images.size(); ++i) {
+        VkImageViewCreateInfo image_views_info {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            
+            .image = images[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = format,
 
-    VkDescriptorPoolCreateInfo pool_info{
-        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        nullptr,
-        0,
-        4,
-        static_cast<uint32_t>(pool_sizes.size()),
-        pool_sizes.data()
-    };
+            .components = {
+                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .a = VK_COMPONENT_SWIZZLE_IDENTITY
+            },
+            .subresourceRange = {
+                .aspectMask = aspect_flags,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        };
 
-    if (vkCreateDescriptorPool(globals::device::device, &pool_info, nullptr, &g_descriptor_pool) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create descriptor pool");
+        if (vkCreateImageView(globals::device::device,&image_views_info,nullptr,&image_views[i])) {
+            logger::log("<konanix> Failed to create image views!",logger::exc);
+            throw std::runtime_error("failed to create image views");
+        }
     }
 }
 
-void konanix::create_descriptor_set() {
-    VkDescriptorSetLayout layouts[] = { g_descriptor_set_layout };
-
-    VkDescriptorSetAllocateInfo alloc_info{
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        nullptr,
-        g_descriptor_pool,
-        1,
-        layouts
+static void create_image_view(const VkImage &image, const VkFormat format, VkImageView &image_view, const VkImageAspectFlagBits aspect_flag = VK_IMAGE_ASPECT_COLOR_BIT) {
+    VkImageViewCreateInfo imageview_info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        
+        .image = image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .components = {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY
+        },
+        .subresourceRange = {
+            .aspectMask = aspect_flag,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
     };
 
-    VkResult res = vkAllocateDescriptorSets(globals::device::device, &alloc_info, &g_descriptor_set);
-    if (res != VK_SUCCESS) {
-        throw std::runtime_error("vkAllocateDescriptorSets failed with code " + std::to_string((int)res));
+    if (vkCreateImageView(globals::device::device,&imageview_info,nullptr,&image_view)) {
+        logger::log("<konanix> Failed to create image views!",logger::exc);
+        throw std::runtime_error("failed to create image views");
     }
-
-    VkDescriptorImageInfo image_info{
-        g_gif_sampler,
-        g_gif_image_view,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-
-    VkWriteDescriptorSet write{
-        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        nullptr,
-        g_descriptor_set,
-        0,
-        0,
-        1,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        &image_info,
-        nullptr,
-        nullptr
-    };
-
-    vkUpdateDescriptorSets(globals::device::device, 1, &write, 0, nullptr);
-}
-
-static void create_descriptor_set_layout() {
-    constexpr VkDescriptorSetLayoutBinding gif_binding {
-        0,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
-    };
-
-    const VkDescriptorSetLayoutCreateInfo layout_info {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        VK_NULL_HANDLE,
-        0,
-        1,
-        &gif_binding
-    };
-
-    if (vkCreateDescriptorSetLayout(globals::device::device,&layout_info,nullptr,&g_descriptor_set_layout) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create descriptor set");
-    }
-}
-
-static std::vector<uint8_t> read_binary_file(const std::string& path) {
-    logger::log("Parsing \""+path+"\"...",logger::dbg);
-
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) {
-        logger::log("Unable to open \""+path+"\"!",logger::exc);
-        throw std::runtime_error("failed to open file: " + path);
-    }
-
-    const std::streamsize size = file.tellg();
-    if (size <= 0) {
-        logger::log("File \""+path+"\" is empty!",logger::exc);
-        throw std::runtime_error("empty file: " + path);
-    }
-
-    std::vector<uint8_t> data(static_cast<size_t>(size));
-    file.seekg(0, std::ios::beg);
-    if (!file.read(reinterpret_cast<char*>(data.data()), size)) {
-        logger::log("Unable to read \""+path+"\"!",logger::exc);
-        throw std::runtime_error("failed to read file: " + path);
-    }
-    logger::log("Read \""+path+"\"!",logger::dbg);
-    return data;
-}
-
-VkCommandBuffer konanix::begin_single_time_commands() {
-    VkCommandBufferAllocateInfo alloc_info{
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        nullptr,
-        g_commandpool,
-        VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        1
-    };
-
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    if (vkAllocateCommandBuffers(globals::device::device, &alloc_info, &cmd) != VK_SUCCESS) {
-        logger::log("Failed to allocate transient command buffer!",logger::exc);
-        throw std::runtime_error("failed to allocate transient command buffer");
-    }
-
-    VkCommandBufferBeginInfo begin_info{
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        nullptr,
-        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        nullptr
-    };
-
-    if (vkBeginCommandBuffer(cmd, &begin_info) != VK_SUCCESS) {
-        vkFreeCommandBuffers(globals::device::device, g_commandpool, 1, &cmd);
-        logger::log("Failed to begin transient command buffer!",logger::exc);
-        throw std::runtime_error("failed to begin transient command buffer");
-    }
-
-    return cmd;
-}
-
-void konanix::end_single_time_commands(VkCommandBuffer cmd) {
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        vkFreeCommandBuffers(globals::device::device, g_commandpool, 1, &cmd);
-        logger::log("Failed to end transient command buffer!",logger::exc);
-        throw std::runtime_error("failed to end transient command buffer");
-    }
-
-    VkSubmitInfo submit_info{
-        VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        nullptr,
-        0, nullptr, nullptr,
-        1, &cmd,
-        0, nullptr
-    };
-
-    if (vkQueueSubmit(globals::device::graphics_queue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS) {
-        vkFreeCommandBuffers(globals::device::device, g_commandpool, 1, &cmd);
-        logger::log("Failed to submit transient command buffer!",logger::exc);
-        throw std::runtime_error("failed to submit transient command buffer");
-    }
-
-    vkQueueWaitIdle(globals::device::graphics_queue);
-    vkFreeCommandBuffers(globals::device::device, g_commandpool, 1, &cmd);
+    
 }
 
 static void transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
@@ -1852,7 +1752,7 @@ static void transition_image_layout(VkImage image, VkImageLayout old_layout, VkI
         barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     } else {
-        vkFreeCommandBuffers(globals::device::device, g_commandpool, 1, &cmd);
+        vkFreeCommandBuffers(globals::device::device, globals::command::pool, 1, &cmd);
         logger::log("Unsupported image layout transition!",logger::exc);
         throw std::runtime_error("unsupported image layout transition");
     }
@@ -1998,75 +1898,207 @@ void konanix::create_gif_image(uint32_t width, uint32_t height) {
     // transition_image_layout(g_gif_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
-static void framebuffer_resize_callback(GLFWwindow* window, int width, int height) {
-    konanix::globals::swapchain::swapchain_rebuild = true; 
-};
+// ---------------------------------------------------------------------------
+// buffer functions
+// ---------------------------------------------------------------------------
+
+static void create_command_buffers() {
+    logger::log("<konanix> Allocating command buffer...",logger::dbg);
+    globals::command::buffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+    const VkCommandBufferAllocateInfo alloc_info {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = nullptr,
+        
+        .commandPool = globals::command::pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = (uint32_t) globals::command::buffers.size()
+    };
+
+    if (vkAllocateCommandBuffers(globals::device::device,&alloc_info,globals::command::buffers.data()) != VK_SUCCESS) {
+            logger::log("<konanix> Failed to allocate the command buffer!",logger::exc);
+            throw std::runtime_error("failed to allocate command buffer");
+    }
+
+    logger::log("<konanix> Command buffer allocated successfully!",logger::dbg);
+
+}
+
+// ---------------------------------------------------------------------------
+// miscellaneous objects
+// ---------------------------------------------------------------------------
+
+static void create_sync_objects() {
+    // globals::sync::image_available_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    globals::sync::render_finished_semaphores.resize(globals::swapchain::images.size());
+    // globals::sync::in_flight_fences.resize(MAX_FRAMES_IN_FLIGHT);
+    globals::sync::images_in_flight.resize(globals::swapchain::images.size(),VK_NULL_HANDLE);
+
+    constexpr VkSemaphoreCreateInfo semaphore_info {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0
+    };
+
+    constexpr VkFenceCreateInfo fence_info {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
+    };
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        if (vkCreateSemaphore(globals::device::device,&semaphore_info,nullptr,&globals::sync::image_available_semaphores[i]) != VK_SUCCESS) {
+            logger::log("<konanix> Failed create a semaphore!",logger::exc);
+            throw std::runtime_error("failed to create a semaphore");
+        }     
+
+        if (vkCreateFence(globals::device::device,&fence_info,nullptr,&globals::sync::in_flight_fences[i]) != VK_SUCCESS) {
+            logger::log("<konanix> Failed create a fance!",logger::exc);
+            throw std::runtime_error("failed to create a fence");
+        }
+
+        //if (vkCreateSemaphore(globals::device::device,&semaphore_info,nullptr,&globals::sync::render_finished_semaphores[i]) != VK_SUCCESS) {
+        //    logger::log("<konanix> Failed create a semaphore!",logger::exc);
+        //    throw std::runtime_error("failed to create a semaphore");
+        //}
+
+    } 
+
+    for (size_t i = 0; i < globals::swapchain::images.size(); ++i)
+        if (vkCreateSemaphore(globals::device::device,&semaphore_info,nullptr,&globals::sync::render_finished_semaphores[i]) != VK_SUCCESS) {
+            logger::log("<konanix> Failed create a semaphore!",logger::exc);
+            throw std::runtime_error("failed to create a semaphore");
+        }
+}
+
+void konanix::recreate_swap_chain() {
+    logger::log("<konanix> Recreating swap chain, waiting for device...",logger::dbg);
+    vkDeviceWaitIdle(globals::device::device);
+    // vkDeviceWaitIdle(globals::device);
+    glfwGetWindowSize(globals::window,&globals::width,&globals::height);
+    if (globals::width == 0 || globals::height == 0) {
+        glfwWaitEvents();
+        recreate_swap_chain();
+    }
+
+    //globals::swapchain::image_views.clear();
+    //globals::swapchain::swapchain = nullptr;
+
+    // for (VkFramebuffer f : globals::swapchain::framebuffers)
+    //     vkDestroyFramebuffer(globals::device::device, f, nullptr);
+
+    // for (VkImageView iw : globals::swapchain::image_views)
+    //     vkDestroyImageView(globals::device::device, iw, nullptr);
+
+    // vkDestroySwapchainKHR(globals::device::device, globals::swapchain::swapchain, nullptr);
+    
+    // vkDestroyImage(globals::device::device,globals::swapchain::images[current_frame],nullptr);
+    // vkDestroyImageView(globals::device::device, globals::swapchain::image_views[current_frame], nullptr);
+    // vkDestroySampler(globals::device::device,g_sampler,nullptr);
+
+    //create_image_view(g_depth_image,find_depth_format(),g_depth_image_view,VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    // destroy/free old objects 
+    // vkDestroyImage(globals::device::device,g_color_image,globals::allocator);
+    // vkDestroyImageView(globals::device::device,g_color_image_view,globals::allocator);
+    // vkFreeMemory(globals::device::device,g_color_memory,globals::allocator);
+    //
+    // vkDestroyImage(globals::device::device,g_depth_image,globals::allocator);
+    // vkDestroyImageView(globals::device::device,g_depth_image_view,globals::allocator);
+    // vkFreeMemory(globals::device::device,g_depth_memory,globals::allocator);
+    
+    for (VkImageView &iw : globals::swapchain::image_views)
+        vkDestroyImageView(globals::device::device,iw,globals::allocator);
+
+    for (VkFramebuffer &fb : globals::swapchain::framebuffers)
+        vkDestroyFramebuffer(globals::device::device,fb,globals::allocator);
+
+    // recreate
+    create_swap_chain();
+
+    create_image_views(globals::swapchain::images,globals::swapchain::format,globals::swapchain::image_views,VK_IMAGE_ASPECT_COLOR_BIT);
+
+    // create_color_resources(g_color_image,g_color_memory,g_color_image_view);
+    // create_depth_resources(g_depth_image,g_depth_memory,g_depth_image_view);
+
+    create_framebuffers();
+
+    //globals::swapchain::framebuffers.clear();
+    //globals::swapchain::framebuffers.resize(globals::swapchain::image_views.size());
+    // update_descriptor_set();
+    // create_framebuffers();
+
+    globals::sync::images_in_flight.assign(globals::swapchain::images.size(),VK_NULL_HANDLE);
+
+    // logger::log("extent width: "+std::to_string(globals::swapchain::extent.width));
+    // logger::log("extent height: "+std::to_string(globals::swapchain::extent.height));
+    // logger::log("aspect ratio: "+std::to_string(globals::swapchain::aspect_ratio()));
+
+    logger::log("<konanix> Swap chain recreated!",logger::dbg);
+}
+
+// ---------------------------------------------------------------------------
+// initialization and cleanup
+// ---------------------------------------------------------------------------
 
 void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug, const bool &resizable) {
-    width = std::move(w);
-    height = std::move(h);
+    logger::log("<konanix> Initializing renderer...");
+    globals::width = std::move(w);
+    globals::height = std::move(h);
     DEBUG = debug;
     RESIZABLE = resizable;
 
-    if (!glfwInit()) {
-        logger::log("<Vulkan> GLFW failed to initialize!",logger::exc);
-        throw std::runtime_error("failed to initialize glfw");
-    }
-
-    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-
-    glfwWindowHint(GLFW_RED_BITS,mode->redBits);
-    glfwWindowHint(GLFW_GREEN_BITS,mode->greenBits);
-    glfwWindowHint(GLFW_BLUE_BITS,mode->blueBits);
-    glfwWindowHint(GLFW_REFRESH_RATE,mode->refreshRate);
-    logger::log("<Vulkan> Renderer will output "+std::to_string(mode->refreshRate)+"FPS",logger::dbg);
-    // logger::log("<Vulkan> Window will be created with size params: "+std::to_string(width)+"x"+std::to_string(height),logger::dbg);
-
-    glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
-    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
-    glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-    if (!resizable)
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-
-    // logger::log("Creating window with dimensions: "+std::to_string(width)+"x"+std::to_string(height),logger::dbg);
-    g_window = glfwCreateWindow(width,height, "Konata Dancer", nullptr,nullptr);
-    if (!g_window) {
-        logger::log("<Vulkan> Failed to create a GLFW window!",logger::exc);
-        glfwTerminate();
-        throw std::runtime_error("failed to create a glfw window");
-    }
-    g_menu.items = {
-        {"OPEN",[]{}},
-        {"CLOSE",[]{glfwSetWindowShouldClose(g_window,GLFW_TRUE);}},
-    };
-    glfwSetWindowSize(g_window,width,height);
-    glfwSetFramebufferSizeCallback(g_window,framebuffer_resize_callback);
-    glfwSetCursorPosCallback(g_window, cursor_pos_callback);
-    
+    create_window();
     create_instance();
-    {
-        if (glfwCreateWindowSurface(globals::instance, g_window, nullptr, &globals::surface) != VK_SUCCESS) {
-            logger::log("<Vulkan> Failed to create a window surface!",logger::exc);
-            throw std::runtime_error("failed to create a window surface");
-        }
-        logger::log("<Vulkan> Surface created successfully!",logger::dbg);
-    }
+
+    logger::log("<konanix> Creating window surface...",logger::dbg);
+    glfwCreateWindowSurface(globals::instance,globals::window,globals::allocator,&globals::surface);
+    logger::log("<konanix> Window surface created!",logger::dbg);
+    
     create_device();
+
     create_swap_chain();
-    create_image_views();
-    create_command_pool();
-    create_command_buffers();
+    create_image_views(globals::swapchain::images,globals::swapchain::format,globals::swapchain::image_views,VK_IMAGE_ASPECT_COLOR_BIT);
+
     create_render_pass();
+
+    create_command_pool();
+
+    //create_texture_image(*static_cast<stbi_uc*>(texture),texture_len,g_texture,g_texture_mem);
+    //create_texture_image_view(g_texture,VK_FORMAT_R8G8B8A8_SRGB,g_texture_image_view,1);
+    //create_texture_sampler(g_texture_sampler);
+
+    create_gif_image(globals::width, globals::height);
+
     create_descriptor_pool();
     create_descriptor_set_layout();
-
-    create_gif_image(width, height);
-
-    konanix::create_descriptor_set();
+    create_descriptor_set();
     create_graphics_pipeline();
     create_framebuffers();
+
+    create_command_buffers();
+
     create_sync_objects();
 
+    if (g_gif_sampler) {
+       vkDestroySampler(globals::device::device,g_gif_sampler,globals::allocator);
+       logger::log("<konanix> GIF sampler destroyed!",logger::dbg);
+    }
+
+    if (g_gif_image) {
+        vkDestroyImage(globals::device::device,g_gif_image,globals::allocator);
+        logger::log("<konanix> GIF image destroyed!",logger::dbg);
+    }
+
+    if (g_gif_image_view) {
+        vkDestroyImageView(globals::device::device,g_gif_image_view,globals::allocator);
+        logger::log("<konanix> GIF image view destroyed!",logger::dbg);
+    }
+
+    vkFreeMemory(globals::device::device,g_gif_image_memory,globals::allocator);
+    logger::log("<konanix> GIF image memory freed up!",logger::dbg);
+
+    logger::log("<konanix> Renderer initialized!");
 }
 
 void konanix::cleanup() {
@@ -2082,187 +2114,403 @@ void konanix::cleanup() {
     }
     logger::log("<konanix> Debug messenger destroyed!",logger::dbg);
 #endif
-
-    if (g_gif_sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(globals::device::device, g_gif_sampler, nullptr);
-        g_gif_sampler = VK_NULL_HANDLE;
+    if (globals::descriptor::layout != nullptr) {
+        vkDestroyDescriptorSetLayout(globals::device::device,globals::descriptor::layout,nullptr);
+        logger::log("<konanix> Descriptor set destroyed!",logger::dbg);
     }
 
-    if (g_gif_image_view != VK_NULL_HANDLE) {
-        vkDestroyImageView(globals::device::device, g_gif_image_view, nullptr);
-        g_gif_image_view = VK_NULL_HANDLE;
+    if (globals::descriptor::pool != nullptr) {
+        vkDestroyDescriptorPool(globals::device::device,globals::descriptor::pool,nullptr);
+        logger::log("<konanix> Descriptor pool destroyed!",logger::dbg);
     }
 
-    if (g_gif_image != VK_NULL_HANDLE) {
-        vkDestroyImage(globals::device::device, g_gif_image, nullptr);
-        g_gif_image = VK_NULL_HANDLE;
+    if (globals::descriptor::layout != nullptr) {
+        vkDestroyDescriptorSetLayout(globals::device::device,globals::descriptor::material::layout,nullptr);
+        logger::log("<konanix> Material descriptor set destroyed!",logger::dbg);
     }
 
-    if (g_gif_image_memory != VK_NULL_HANDLE) {
-        vkFreeMemory(globals::device::device, g_gif_image_memory, nullptr);
-        g_gif_image_memory = VK_NULL_HANDLE;
-    }
-
-    if (g_descriptor_set_layout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(globals::device::device,g_descriptor_set_layout,nullptr);
-    }
-
-    if (g_descriptor_pool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(globals::device::device,g_descriptor_pool,nullptr);
+    if (globals::descriptor::pool != nullptr) {
+        vkDestroyDescriptorPool(globals::device::device,globals::descriptor::material::pool,nullptr);
+        logger::log("<konanix> Material descriptor pool destroyed!",logger::dbg);
     }
     
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (g_image_available_semaphores[i]!=VK_NULL_HANDLE) {
-            vkDestroySemaphore(globals::device::device,g_image_available_semaphores[i],nullptr);
-            logger::log("<Vulkan> Semaphore \"g_image_available_semaphores["+std::to_string(i)+"]\" destroyed!",logger::dbg);
-        } else { logger::log("<Vulkan> Could not destroy semaphore \"g_image_available_semaphores["+std::to_string(i)+"]\"!",logger::wrn); }
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        if (globals::sync::image_available_semaphores[i]) {
+            vkDestroySemaphore(globals::device::device,globals::sync::image_available_semaphores[i],nullptr);
+            logger::log("<konanix> "+std::to_string(i+1)+"/"+std::to_string(MAX_FRAMES_IN_FLIGHT)+" semaphores destroyed!",logger::dbg);
+        } else { logger::log("<konanix> Could not destroy semaphore \"globals::sync::image_available_semaphores["+std::to_string(i)+"]\"!",logger::wrn); }
 
-        if (g_render_finished_semaphores[i]!=VK_NULL_HANDLE) {
-            vkDestroySemaphore(globals::device::device,g_render_finished_semaphores[i],nullptr);
-            logger::log("<Vulkan> Semaphore \"g_render_finished_semaphores["+std::to_string(i)+"]\" destroyed!",logger::dbg);
-        } else { logger::log("<Vulkan> Could not destroy semaphore \"g_render_finished_semaphores["+std::to_string(i)+"]\"!",logger::wrn); }
-
-        if (g_in_flight_fences[i]!=VK_NULL_HANDLE) {
-            vkDestroyFence(globals::device::device,g_in_flight_fences[i],nullptr);
-            logger::log("<Vulkan> Fence \"g_in_flight_fences["+std::to_string(i)+"]\" destroyed!",logger::dbg);
-        } else { logger::log("<Vulkan> Could not destroy fence \"g_in_flight_fences["+std::to_string(i)+"]\"!",logger::wrn); }
-
-        // vkDestroySemaphore(globals::device::device, g_render_finished_semaphores[i], nullptr);
-        // vkDestroySemaphore(globals::device::device, g_render_finished_semaphores[i], nullptr);
-        // vkDestroyFence(globals::device::device, g_in_flight_fences[i], nullptr);
+        if (globals::sync::in_flight_fences[i]) {
+            vkDestroyFence(globals::device::device,globals::sync::in_flight_fences[i],nullptr);
+            logger::log("<konanix> "+std::to_string(i+1)+"/"+std::to_string(MAX_FRAMES_IN_FLIGHT)+" fences destroyed!",logger::dbg);
+        } else { logger::log("<konanix> Could not destroy fence \"globals::sync::in_flight_fences["+std::to_string(i)+"]\"!",logger::wrn); }
     }
 
-    if (g_commandpool!=VK_NULL_HANDLE) {
-        vkDestroyCommandPool(globals::device::device,g_commandpool,nullptr);
-        logger::log("<Vulkan> Command pool destroyed!",logger::dbg);
+    for (size_t i = 0; i < globals::swapchain::images.size(); ++i)        
+        if (globals::sync::render_finished_semaphores[i]) {
+            vkDestroySemaphore(globals::device::device,globals::sync::render_finished_semaphores[i],nullptr);
+            logger::log("<konanix> "+std::to_string(i+1)+"/"+std::to_string(globals::swapchain::images.size())+" render finished semaphores destroyed!",logger::dbg);
+        } else { logger::log("<konanix> Could not destroy semaphore \"globals::sync::render_finished_semaphores["+std::to_string(i)+"]\"!",logger::wrn); }
+
+
+
+    if (globals::command::pool) {
+        vkDestroyCommandPool(globals::device::device,globals::command::pool,nullptr);
+        logger::log("<konanix> Command pool destroyed!",logger::dbg);
     }
 
-    for (VkFramebuffer fb : globals::swapchain::swapchain_framebuffers) {
+    for (VkFramebuffer &fb : globals::swapchain::framebuffers)
         vkDestroyFramebuffer(globals::device::device,fb,nullptr);
-    }
-    logger::log("<Vulkan> globals::swapchain::swapchain_framebuffers vector cleaned up successfully!",logger::dbg);
+    
+    logger::log("<konanix> globals::swapchain::framebuffers cleaned up!",logger::dbg);
 
-    if (g_graphics_pipeline!=VK_NULL_HANDLE) {
-        vkDestroyPipeline(globals::device::device,g_graphics_pipeline,nullptr);
-        logger::log("<Vulkan> Graphics pipeline destroyed!",logger::dbg);
-    }
-
-    if (g_pipeline_layout!=VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(globals::device::device,g_pipeline_layout,nullptr);
-        logger::log("<Vulkan> Pipeline layout destroyed!",logger::dbg);
+    if (globals::pipeline::graphics_pipeline) {
+        vkDestroyPipeline(globals::device::device,globals::pipeline::graphics_pipeline,nullptr);
+        logger::log("<konanix> Graphics pipeline destroyed!",logger::dbg);
     }
 
-    if (g_renderpass!=VK_NULL_HANDLE) {
-        vkDestroyRenderPass(globals::device::device,g_renderpass,nullptr);
-        logger::log("<Vulkan> Render Pass destroyed!",logger::dbg);
+    if (globals::pipeline::graphics_pipeline_layout) {
+        vkDestroyPipelineLayout(globals::device::device,globals::pipeline::graphics_pipeline_layout,nullptr);
+        logger::log("<konanix> Pipeline layout destroyed!",logger::dbg);
     }
 
-    for (VkImageView iw : globals::swapchain::swapchain_image_views) {
-        vkDestroyImageView(globals::device::device,iw,nullptr);
+    if (globals::pipeline::line_pipeline) {
+        vkDestroyPipeline(globals::device::device,globals::pipeline::line_pipeline,nullptr);
+        logger::log("<konanix> Line pipeline destroyed!",logger::dbg);
     }
-    logger::log("<Vulkan> globals::swapchain::swapchain_image_views vector cleaned up successfully!",logger::dbg);
 
-    if (globals::swapchain::swapchain!=VK_NULL_HANDLE) {
+    if (globals::pipeline::line_pipeline_layout) {
+        vkDestroyPipelineLayout(globals::device::device,globals::pipeline::line_pipeline_layout,nullptr);
+        logger::log("<konanix> Line pipeline layout destroyed!",logger::dbg);
+    }
+
+    if (globals::pipeline::renderpass) {
+        vkDestroyRenderPass(globals::device::device,globals::pipeline::renderpass,nullptr);
+        logger::log("<konanix> Render Pass destroyed!",logger::dbg);
+    }
+
+
+//    for (size_t i = 0; i < globals::swapchain::images.size(); ++i) {
+//        if (globals::swapchain::images[i]) {
+//            vkDestroyImage(globals::device::device,globals::swapchain::images[i],globals::allocator);
+//            logger::log("<konanix> Swapchain image "+std::to_string(i)+"/"+std::to_string(globals::swapchain::images.size()-1)+" destroyed!",logger::dbg);
+//        }
+//    }
+
+    for (size_t i = 0; i < globals::swapchain::image_views.size(); ++i) {
+        if (globals::swapchain::image_views[i]) {
+            vkDestroyImageView(globals::device::device,globals::swapchain::image_views[i],globals::allocator);
+            logger::log("<konanix> Swapchain image view "+std::to_string(i+1)+"/"+std::to_string(globals::swapchain::image_views.size())+" destroyed!",logger::dbg);
+        }
+    }
+
+    if (globals::swapchain::swapchain) {
         vkDestroySwapchainKHR(globals::device::device,globals::swapchain::swapchain,nullptr);
-        logger::log("<Vulkan> Swap chain destroyed successfully!",logger::dbg);
+        logger::log("<konanix> Swap chain destroyed successfully!",logger::dbg);
     }
 
-    if (globals::device::device!=VK_NULL_HANDLE) {
+    if (g_gif_sampler) {
+       vkDestroySampler(globals::device::device,g_gif_sampler,globals::allocator);
+       logger::log("<konanix> GIF sampler destroyed!",logger::dbg);
+    }
+
+    if (g_gif_image) {
+        vkDestroyImage(globals::device::device,g_gif_image,globals::allocator);
+        logger::log("<konanix> GIF image destroyed!",logger::dbg);
+    }
+
+    if (g_gif_image_view) {
+        vkDestroyImageView(globals::device::device,g_gif_image_view,globals::allocator);
+        logger::log("<konanix> GIF image view destroyed!",logger::dbg);
+    }
+
+    vkFreeMemory(globals::device::device,g_gif_image_memory,globals::allocator);
+    logger::log("<konanix> GIF image memory freed up!",logger::dbg);
+
+    if (globals::device::device) {
         vkDestroyDevice(globals::device::device,nullptr);
-        globals::device::device = VK_NULL_HANDLE;
-        logger::log("<Vulkan> Device instance destroyed successfully!",logger::dbg);
+        globals::device::device = nullptr;
+        logger::log("<konanix> Device instance destroyed successfully!",logger::dbg);
     }
 
-    if (globals::surface!=VK_NULL_HANDLE) {
+    if (globals::surface) {
         vkDestroySurfaceKHR(globals::instance, globals::surface, nullptr);
-        globals::surface = VK_NULL_HANDLE;
-        logger::log("<Vulkan> Surface destroyed successfully!",logger::dbg);
+        globals::surface = nullptr;
+        logger::log("<konanix> Surface destroyed successfully!",logger::dbg);
     }
 
-    if (globals::instance!=VK_NULL_HANDLE) {
+    if (globals::instance) {
         vkDestroyInstance(globals::instance, nullptr);
-        globals::instance = VK_NULL_HANDLE;
-        logger::log("<Vulkan> Instance destroyed successfully!",logger::dbg);
+        globals::instance = nullptr;
+        logger::log("<konanix> Instance destroyed successfully!",logger::dbg);
     }
 
-    if (g_window) {
-        glfwDestroyWindow(g_window);
-        g_window = nullptr;
+    if (globals::window) {
+        glfwDestroyWindow(globals::window);
+        globals::window = nullptr;
     }
     glfwTerminate();
-    logger::log("<Vulkan> Objects cleaned up!",logger::dbg);
-
+    logger::log("<konanix> Vulkan cleaned up!",logger::dbg);
 }
+
+// ---------------------------------------------------------------------------
+// command buffer
+// ---------------------------------------------------------------------------
+
+
+void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index) {
+    VkCommandBufferBeginInfo begin_info{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .pInheritanceInfo = nullptr
+    };
+
+    if (vkBeginCommandBuffer(commandbuffer, &begin_info) != VK_SUCCESS) {
+        throw std::runtime_error("failed to begin recording command buffer");
+    }
+
+    constexpr VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 0.0f}}};
+
+    const VkRenderPassBeginInfo renderpass_info{
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .pNext = nullptr,
+        
+        .renderPass = globals::pipeline::renderpass,
+        .framebuffer = globals::swapchain::framebuffers[image_index],
+        .renderArea = {
+            .offset = {0, 0},
+            .extent = globals::swapchain::extent
+        },
+        .clearValueCount = 1,
+        .pClearValues = &clear_color
+    };
+
+    vkCmdBeginRenderPass(commandbuffer, &renderpass_info, VK_SUBPASS_CONTENTS_INLINE);
+
+    vkCmdBindPipeline(commandbuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, globals::pipeline::graphics_pipeline);
+
+    const VkViewport viewport{
+        .x = 0.0f, .y = 0.0f,
+        .width = static_cast<float>(globals::swapchain::extent.width),
+        .height = static_cast<float>(globals::swapchain::extent.height),
+        .minDepth = 0.0f, .maxDepth = 1.0f
+    };
+    vkCmdSetViewport(commandbuffer, 0, 1, &viewport);
+
+    VkRect2D scissor{{0, 0}, globals::swapchain::extent};
+    vkCmdSetScissor(commandbuffer, 0, 1, &scissor);
+
+    vkCmdBindDescriptorSets(
+        commandbuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        globals::pipeline::graphics_pipeline_layout,
+        0,
+        1,
+        &globals::descriptor::sets[current_frame],
+        0,
+        nullptr
+    );
+
+    vkCmdDraw(commandbuffer, 3, 1, 0, 0);
+
+    vkCmdEndRenderPass(commandbuffer);
+
+    if (vkEndCommandBuffer(commandbuffer) != VK_SUCCESS) {
+        throw std::runtime_error("failed to record command buffer");
+    }
+}
+
+
+
+
+
+
+
+static std::vector<uint8_t> read_binary_file(const std::string& path) {
+    logger::log("Parsing \""+path+"\"...",logger::dbg);
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        logger::log("Unable to open \""+path+"\"!",logger::exc);
+        throw std::runtime_error("failed to open file: " + path);
+    }
+
+    const std::streamsize size = file.tellg();
+    if (size <= 0) {
+        logger::log("File \""+path+"\" is empty!",logger::exc);
+        throw std::runtime_error("empty file: " + path);
+    }
+
+    std::vector<uint8_t> data(static_cast<size_t>(size));
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char*>(data.data()), size)) {
+        logger::log("Unable to read \""+path+"\"!",logger::exc);
+        throw std::runtime_error("failed to read file: " + path);
+    }
+    logger::log("Read \""+path+"\"!",logger::dbg);
+    return data;
+}
+
+VkCommandBuffer konanix::begin_single_time_commands() {
+    const VkCommandBufferAllocateInfo alloc_info {
+        .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = nullptr,
+        .commandPool = konanix::globals::command::pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+
+    VkCommandBuffer cmd = nullptr;
+    if (vkAllocateCommandBuffers(konanix::globals::device::device, &alloc_info, &cmd) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to allocate transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to allocate transient command buffer");
+    }
+
+    const VkCommandBufferBeginInfo begin_info {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr
+    };
+
+    if (vkBeginCommandBuffer(cmd, &begin_info) != VK_SUCCESS) {
+        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
+        logger::log("<konanix> Failed to begin transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to begin transient command buffer");
+    }
+
+    return std::move(cmd);
+}
+
+void konanix::end_single_time_commands(VkCommandBuffer &cmd) {
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
+        logger::log("<konanix> Failed to end transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to end transient command buffer");
+    }
+
+    const VkSubmitInfo submit_info{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+
+        .waitSemaphoreCount = 0, 
+        .pWaitSemaphores = nullptr, 
+        .pWaitDstStageMask = nullptr,
+
+        .commandBufferCount = 1, 
+        .pCommandBuffers = &cmd,
+
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = nullptr
+    };
+
+    if (vkQueueSubmit(konanix::globals::device::graphics_queue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS) {
+        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
+        logger::log("<konanix> Failed to submit transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to submit transient command buffer");
+    }
+
+    vkQueueWaitIdle(konanix::globals::device::graphics_queue);
+    vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
+}
+
+// ---------------------------------------------------------------------------
+// main loop
+// ---------------------------------------------------------------------------
 
 void konanix::draw_frame(int w, int h) {
     // width = w; height = h;
     // glfwSetWindowSize(g_window,width,height);
-    vkWaitForFences(globals::device::device,1,&g_in_flight_fences[current_frame],VK_TRUE,UINT64_MAX);
+    vkWaitForFences(globals::device::device,1,&globals::sync::in_flight_fences[current_frame],VK_TRUE,UINT64_MAX);
     // vkResetFences(globals::device::device,1,&g_in_flight_fences[current_frame]);
     
-    if (globals::swapchain::swapchain_rebuild) {
-        globals::swapchain::swapchain_rebuild = false; 
+    if (g_swapchain_rebuild) {
+        g_swapchain_rebuild = false; 
         recreate_swap_chain();
         return;
     }
 
-    glfwGetWindowSize(g_window,&width,&height);
+    glfwGetWindowSize(globals::window,&globals::width,&globals::height);
     uint32_t image_index;
-    // vkAcquireNextImageKHR(globals::device::device, globals::swapchain::swapchain, UINT64_MAX, g_image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
-    VkResult result = vkAcquireNextImageKHR(globals::device::device, globals::swapchain::swapchain, UINT64_MAX, g_image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || globals::swapchain::swapchain_rebuild) {
+    VkResult result = vkAcquireNextImageKHR(globals::device::device, globals::swapchain::swapchain, UINT64_MAX, globals::sync::image_available_semaphores[current_frame], nullptr, &image_index);
+    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR || g_swapchain_rebuild) {
         recreate_swap_chain();
         return;
-    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        logger::log("<Vulkan> Failed to acquire swap chain image!",logger::exc);
-        throw std::runtime_error("failed to acquire swap chain image");
-    }    
-    
-    vkResetFences(globals::device::device,1,&g_in_flight_fences[current_frame]);
+    } 
 
-    vkResetCommandBuffer(g_commandbuffers[current_frame],0);
-    record_command_buffer(g_commandbuffers[current_frame], image_index);
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        logger::log("<konanix> Failed to acquire swapchain image!",logger::exc);
+        throw std::runtime_error("failed to acquire swapchain image");
+    }
+
+    // if (glfwGetKey(globals::window, 32) == GLFW_PRESS) glfwSetWindowShouldClose(g_window,GLFW_TRUE);
+
+    if (globals::sync::images_in_flight[image_index] != VK_NULL_HANDLE) {
+        vkWaitForFences(globals::device::device,1,&globals::sync::images_in_flight[image_index],VK_TRUE,UINT64_MAX);
+    }
+
+    globals::sync::images_in_flight[image_index] = globals::sync::in_flight_fences[current_frame];
+
+    vkResetFences(globals::device::device,1,&globals::sync::in_flight_fences[current_frame]);
+
+    vkResetCommandBuffer(globals::command::buffers[current_frame],0);
+
+    std::chrono::time_point<std::chrono::high_resolution_clock, std::chrono::duration<long, std::ratio<1,1000000000>>> time_now = std::chrono::high_resolution_clock::now();
+    globals::time::delta_time = std::chrono::duration<float>(time_now - globals::time::last_frame).count();
+    globals::time::last_frame = time_now;
+    globals::time::elapsed = std::chrono::duration<float>(time_now - globals::time::start).count();
     
-    const VkSemaphore wait_semaphores[] = {g_image_available_semaphores[current_frame]};
+    record_command_buffer(globals::command::buffers[current_frame], image_index);
+    
+    // const VkSemaphore wait_semaphores[] = {globals::sync::image_available_semaphores[current_frame]};
     const VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    const VkSemaphore signal_semaphores[] = {g_render_finished_semaphores[current_frame]};
+    // const VkSemaphore signal_semaphores[] = {globals::sync::render_finished_semaphores[current_frame]};
 
     const VkSubmitInfo submit_info {
-        VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        VK_NULL_HANDLE,
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = VK_NULL_HANDLE,
 
-        1,
-        wait_semaphores,
-        wait_stages,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &globals::sync::image_available_semaphores[current_frame],
+        .pWaitDstStageMask = wait_stages,
 
-        1,
-        &g_commandbuffers[current_frame],
+        .commandBufferCount = 1,
+        .pCommandBuffers = &globals::command::buffers[current_frame],
 
-        1,
-        signal_semaphores
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &globals::sync::render_finished_semaphores[image_index]
     };
-    if (vkQueueSubmit(globals::device::graphics_queue,1,&submit_info,g_in_flight_fences[current_frame]) != VK_SUCCESS) {
-        logger::log("<Vulkan> Failed to submit draw command buffer!",logger::exc);
+    if (vkQueueSubmit(globals::device::graphics_queue,1,&submit_info,globals::sync::in_flight_fences[current_frame]) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to submit draw command buffer!",logger::exc);
         throw std::runtime_error("failed to submit draw command buffer");
     } 
-    
-
-    const VkSwapchainKHR swapchains[] = {globals::swapchain::swapchain};
+   
+    VkSwapchainKHR swapchains[] = {globals::swapchain::swapchain};
 
     const VkPresentInfoKHR present_info {
-        VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        VK_NULL_HANDLE,
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext = VK_NULL_HANDLE,
 
-        1,
-        signal_semaphores,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &globals::sync::render_finished_semaphores[image_index],
 
-        1,
-        swapchains,
+        .swapchainCount = 1,
+        .pSwapchains = swapchains,
 
-        &image_index,
+        .pImageIndices = &image_index,
 
-        nullptr
+        .pResults = nullptr
     };
     vkQueuePresentKHR(globals::device::present_queue,&present_info);
+
+    //if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    //    recreate_swap_chain();
+    //} else if (result != VK_SUCCESS) {
+    //    logger::log("Failed to present the swapchain image!",logger::exc);
+    //    throw std::runtime_error("failed to present swapchain image");
+    //}
     current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    // logger::log("Current frame: "+std::to_string(current_frame));
+
 };

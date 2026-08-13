@@ -39,8 +39,8 @@
 #include <GLFW/glfw3native.h>
 
 namespace konanix {
-    inline GLFWwindow* g_window = nullptr;
     inline bool g_swapchain_rebuild = false;
+
     void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
     void render();
     void cleanup();
@@ -77,7 +77,7 @@ namespace konanix {
     void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
 
     VkCommandBuffer begin_single_time_commands();
-    void end_single_time_commands(VkCommandBuffer command_buffer);
+    void end_single_time_commands(VkCommandBuffer &command_buffer);
     // void copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height);
     void create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                             VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory);
