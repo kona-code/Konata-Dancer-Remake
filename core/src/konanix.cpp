@@ -59,7 +59,7 @@ using namespace konanix;
 
 static constexpr short                  version[3]                      = {1, 0, 0};
 static uint32_t                         current_frame                   = 1;
-static uint32_t                         current_gif_frame               = 1;
+static uint32_t                         current_gif_frame               = 0;
 
 static bool                             DEBUG                           = false;
 static bool                             RESIZABLE                       = false;
@@ -320,6 +320,70 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
 // ---------------------------------------------------------------------------
 // miscellaneous vulkan helpers
 // ---------------------------------------------------------------------------
+
+static VkCommandBuffer begin_single_time_commands() {
+    const VkCommandBufferAllocateInfo alloc_info {
+        .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = nullptr,
+        .commandPool = konanix::globals::command::pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+
+    VkCommandBuffer cmd = nullptr;
+    if (vkAllocateCommandBuffers(konanix::globals::device::device, &alloc_info, &cmd) != VK_SUCCESS) {
+        logger::log("<konanix> Failed to allocate transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to allocate transient command buffer");
+    }
+
+    const VkCommandBufferBeginInfo begin_info {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr
+    };
+
+    if (vkBeginCommandBuffer(cmd, &begin_info) != VK_SUCCESS) {
+        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
+        logger::log("<konanix> Failed to begin transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to begin transient command buffer");
+    }
+
+    return std::move(cmd);
+}
+
+static void end_single_time_commands(VkCommandBuffer &cmd) {
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
+        logger::log("<konanix> Failed to end transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to end transient command buffer");
+    }
+
+    const VkSubmitInfo submit_info{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+
+        .waitSemaphoreCount = 0, 
+        .pWaitSemaphores = nullptr, 
+        .pWaitDstStageMask = nullptr,
+
+        .commandBufferCount = 1, 
+        .pCommandBuffers = &cmd,
+
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = nullptr
+    };
+
+    if (vkQueueSubmit(konanix::globals::device::graphics_queue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS) {
+        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
+        logger::log("<konanix> Failed to submit transient command buffer!",logger::exc);
+        throw std::runtime_error("failed to submit transient command buffer");
+    }
+
+    vkQueueWaitIdle(konanix::globals::device::graphics_queue);
+    vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
+}
+
 
 static SwapChainSupportDetails query_swap_chain_support(const VkPhysicalDevice device, VkSurfaceKHR surface) {
     SwapChainSupportDetails details;
@@ -1143,6 +1207,26 @@ static void update_descriptor_set() {
     logger::log("<konanix> Descriptor sets updated!",logger::dbg);
 }
 
+void set_gif_frame(uint32_t frame) 
+{
+    const VkDescriptorImageInfo image_info{
+        g_gif_sampler,
+        gif_frames[frame].image_view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    const VkWriteDescriptorSet write {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = globals::descriptor::sets[current_frame],
+        .dstBinding = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &image_info
+    };
+
+    vkUpdateDescriptorSets(globals::device::device, 1, &write, 0, nullptr);
+}
+
 // ---------------------------------------------------------------------------
 // fixed functions
 // ---------------------------------------------------------------------------
@@ -1223,8 +1307,8 @@ static void create_render_pass() {
         .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
 
         // VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, // .srcAccessMask
-        .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        // .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        // .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
     };
 
     const VkRenderPassCreateInfo renderpass_info {
@@ -1726,7 +1810,7 @@ static void create_image_view(const VkImage &image, const VkFormat format, VkIma
 }
 
 static void transition_image_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
-    VkCommandBuffer cmd = konanix::begin_single_time_commands();
+    VkCommandBuffer cmd = begin_single_time_commands();
 
     VkImageMemoryBarrier barrier{
         VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1772,7 +1856,7 @@ static void transition_image_layout(VkImage image, VkImageLayout old_layout, VkI
         1, &barrier
     );
 
-    konanix::end_single_time_commands(cmd);
+    end_single_time_commands(cmd);
 }
 
 static void copy_buffer_to_image(
@@ -1781,7 +1865,7 @@ static void copy_buffer_to_image(
     uint32_t width,
     uint32_t height
 ) {
-    VkCommandBuffer cmd = konanix::begin_single_time_commands();
+    VkCommandBuffer cmd = begin_single_time_commands();
 
     VkBufferImageCopy region{};
     region.bufferOffset = 0;
@@ -1803,62 +1887,54 @@ static void copy_buffer_to_image(
         &region
     );
 
-    konanix::end_single_time_commands(cmd);
+    end_single_time_commands(cmd);
 }
 
-// void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload) {
-//     VkBuffer staging_buffer = VK_NULL_HANDLE;
-//     VkDeviceMemory staging_memory = VK_NULL_HANDLE;
-//
-//     create_buffer(
-//         static_cast<VkDeviceSize>(pixel_bytes),
-//         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-//         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-//         staging_buffer,
-//         staging_memory
-//     );
-//     // logger::log("Created buffer for GIF frame",logger::dbg);
-//
-//     void* mapped = nullptr;
-//     if (vkMapMemory(globals::device::device, staging_memory, 0, pixel_bytes, 0, &mapped) != VK_SUCCESS) {
-//         vkDestroyBuffer(globals::device::device, staging_buffer, nullptr);
-//         vkFreeMemory(globals::device::device, staging_memory, nullptr);
-//         logger::log("Failed to map staging memory!",logger::exc);
-//         throw std::runtime_error("failed to map staging memory");
-//     }
-//
-//     memcpy(mapped, rgba_pixels, pixel_bytes);
-//     vkUnmapMemory(globals::device::device, staging_memory);
-//     // logger::log("Moved GIF pixel data to \"pixel_bytes\"!",logger::dbg);
-//
-//     const VkImageLayout from_layout = first_upload
-//         ? VK_IMAGE_LAYOUT_UNDEFINED
-//         : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-//
-//     transition_image_layout(
-//         g_gif_image,
-//         from_layout,
-//         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-//     );
-//
-//     copy_buffer_to_image(
-//         staging_buffer,
-//         g_gif_image,
-//         width,
-//         height
-//     );
-//     // logger::log("Successfully copied buffer to image!",logger::dbg);
-//
-//     transition_image_layout(
-//         g_gif_image,
-//         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-//         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-//     );
-//
-//     vkDestroyBuffer(globals::device::device, staging_buffer, nullptr);
-//     vkFreeMemory(globals::device::device, staging_memory, nullptr);
-//     // logger::log("Freed up unneeded memory!",logger::dbg);
-// }
+void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload) {
+    VkBuffer staging_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+
+    create_buffer(
+        static_cast<VkDeviceSize>(pixel_bytes),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        staging_buffer,
+        staging_memory
+    );
+
+    void* mapped = nullptr;
+    if (vkMapMemory(globals::device::device, staging_memory, 0, pixel_bytes, 0, &mapped) != VK_SUCCESS) {
+        vkDestroyBuffer(globals::device::device, staging_buffer, nullptr);
+        vkFreeMemory(globals::device::device, staging_memory, nullptr);
+        logger::log("Failed to map staging memory!",logger::exc);
+        throw std::runtime_error("failed to map staging memory");
+    }
+
+    memcpy(mapped, rgba_pixels, pixel_bytes);
+    vkUnmapMemory(globals::device::device, staging_memory);
+
+    transition_image_layout(
+        gif_frames[current_gif_frame].image,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+
+    copy_buffer_to_image(
+        staging_buffer,
+        gif_frames[current_gif_frame].image,
+        width,
+        height
+    );
+
+    transition_image_layout(
+        gif_frames[current_gif_frame].image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    vkDestroyBuffer(globals::device::device, staging_buffer, nullptr);
+    vkFreeMemory(globals::device::device, staging_memory, nullptr);
+}
 
 void create_image(const uint32_t w, const uint32_t h, const VkSampleCountFlagBits samples, uint32_t mip_levels, 
                             const VkFormat format, const VkImageTiling tiling,
@@ -1996,9 +2072,6 @@ void copy_buffer_to_image(VkCommandBuffer &cmd, const VkBuffer &buffer, const Vk
 }
 
 void konanix::create_gif_image(const unsigned char *pixels, const uint32_t &frame, uint32_t width, uint32_t height) {
-    const static SwapChainSupportDetails swap_chain_support = query_swap_chain_support(globals::device::physical_device, globals::surface);
-    const static VkSurfaceFormatKHR surface_format = choose_swap_surface_format(swap_chain_support.formats); 
-
     if (!pixels) {
             logger::log("<konanix> Received invalid pixels!",logger::exc);
             throw std::runtime_error("failed to load texture");
@@ -2026,14 +2099,14 @@ void konanix::create_gif_image(const unsigned char *pixels, const uint32_t &fram
         gif_frames[frame].image, gif_frames[frame].image_memory
     );
 
-    VkCommandBuffer cmd = konanix::begin_single_time_commands();
+    VkCommandBuffer cmd = begin_single_time_commands();
 
     transition_image_layout(cmd,gif_frames[frame].image,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1);
     copy_buffer_to_image(cmd,staging_buffer,gif_frames[frame].image,static_cast<uint32_t>(width),static_cast<uint32_t>(height));
     transition_image_layout(cmd,gif_frames[frame].image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
     // generate_mipmaps(cmd, image, VK_FORMAT_R8G8B8A8_SRGB, t_width, t_height, 1);
 
-    konanix::end_single_time_commands(cmd);
+    end_single_time_commands(cmd);
 
     vkDestroyBuffer(konanix::globals::device::device,staging_buffer,konanix::globals::allocator);
     vkFreeMemory(konanix::globals::device::device,staging_buffer_mem,konanix::globals::allocator);
@@ -2044,7 +2117,7 @@ void konanix::create_gif_image(const unsigned char *pixels, const uint32_t &fram
     // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     // gif_frames[frame].image,gif_frames[frame].image_memory);
     //
-    gif_frames[frame].image_view = konanix::create_image_view(gif_frames[frame].image,surface_format.format);
+    gif_frames[frame].image_view = konanix::create_image_view(gif_frames[frame].image,globals::swapchain::format);
 
 
     // transition_image_layout(g_gif_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -2193,15 +2266,15 @@ void konanix::recreate_swap_chain() {
 // initialization and cleanup
 // ---------------------------------------------------------------------------
 
-void konanix::initialize(const uint32_t gif_frame_count, const uint32_t &w, const uint32_t &h, const bool &debug, const bool &resizable) {
+void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug, const bool &resizable) {
     logger::log("<konanix> Initializing renderer...");
-    GIF_FRAME_COUNT = gif_frame_count;
     globals::width = std::move(w);
     globals::height = std::move(h);
     DEBUG = debug;
     RESIZABLE = resizable;
 
     gif_frames.clear();
+    GIF_FRAME_COUNT = static_cast<uint32_t>(konanix::g_raw_anim_data.frames.size());
     gif_frames.resize(GIF_FRAME_COUNT);
 
     create_window();
@@ -2472,74 +2545,11 @@ void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t imag
     }
 }
 
-VkCommandBuffer konanix::begin_single_time_commands() {
-    const VkCommandBufferAllocateInfo alloc_info {
-        .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .pNext = nullptr,
-        .commandPool = konanix::globals::command::pool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1
-    };
-
-    VkCommandBuffer cmd = nullptr;
-    if (vkAllocateCommandBuffers(konanix::globals::device::device, &alloc_info, &cmd) != VK_SUCCESS) {
-        logger::log("<konanix> Failed to allocate transient command buffer!",logger::exc);
-        throw std::runtime_error("failed to allocate transient command buffer");
-    }
-
-    const VkCommandBufferBeginInfo begin_info {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = nullptr,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        .pInheritanceInfo = nullptr
-    };
-
-    if (vkBeginCommandBuffer(cmd, &begin_info) != VK_SUCCESS) {
-        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
-        logger::log("<konanix> Failed to begin transient command buffer!",logger::exc);
-        throw std::runtime_error("failed to begin transient command buffer");
-    }
-
-    return std::move(cmd);
-}
-
-void konanix::end_single_time_commands(VkCommandBuffer &cmd) {
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
-        logger::log("<konanix> Failed to end transient command buffer!",logger::exc);
-        throw std::runtime_error("failed to end transient command buffer");
-    }
-
-    const VkSubmitInfo submit_info{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext = nullptr,
-
-        .waitSemaphoreCount = 0, 
-        .pWaitSemaphores = nullptr, 
-        .pWaitDstStageMask = nullptr,
-
-        .commandBufferCount = 1, 
-        .pCommandBuffers = &cmd,
-
-        .signalSemaphoreCount = 0,
-        .pSignalSemaphores = nullptr
-    };
-
-    if (vkQueueSubmit(konanix::globals::device::graphics_queue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS) {
-        vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
-        logger::log("<konanix> Failed to submit transient command buffer!",logger::exc);
-        throw std::runtime_error("failed to submit transient command buffer");
-    }
-
-    vkQueueWaitIdle(konanix::globals::device::graphics_queue);
-    vkFreeCommandBuffers(konanix::globals::device::device, konanix::globals::command::pool, 1, &cmd);
-}
-
 // ---------------------------------------------------------------------------
 // main loop
 // ---------------------------------------------------------------------------
 
-void konanix::draw_frame(int w, int h) {
+void konanix::draw_frame() {
     // width = w; height = h;
     // glfwSetWindowSize(g_window,width,height);
     vkWaitForFences(globals::device::device,1,&globals::sync::in_flight_fences[current_frame],VK_TRUE,UINT64_MAX);
@@ -2580,7 +2590,10 @@ void konanix::draw_frame(int w, int h) {
     globals::time::delta_time = std::chrono::duration<float>(time_now - globals::time::last_frame).count();
     globals::time::last_frame = time_now;
     globals::time::elapsed = std::chrono::duration<float>(time_now - globals::time::start).count();
-    
+   
+    set_gif_frame(current_gif_frame);
+    logger::log("<konanix> Rendering GIF frame #"+std::to_string(current_gif_frame),logger::dbg);
+
     record_command_buffer(globals::command::buffers[current_frame], image_index);
     
     // const VkSemaphore wait_semaphores[] = {globals::sync::image_available_semaphores[current_frame]};
@@ -2631,6 +2644,7 @@ void konanix::draw_frame(int w, int h) {
     //    throw std::runtime_error("failed to present swapchain image");
     //}
     current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    current_gif_frame = (current_gif_frame + 1) % GIF_FRAME_COUNT;
     // logger::log("Current frame: "+std::to_string(current_frame));
 
 };

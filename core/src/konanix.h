@@ -52,10 +52,9 @@ namespace konanix {
     inline GifAnimation g_raw_anim_data;
     inline bool g_swapchain_rebuild = false;
 
-    void initialize(const uint32_t gif_frame_count, const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
-    void render();
+    void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
     void cleanup();
-    void draw_frame(int width, int height);
+    void draw_frame();
 
     void create_gif_image(const unsigned char* pixels, const uint32_t &frame, uint32_t width, uint32_t height);
     void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload = false);
@@ -80,15 +79,15 @@ namespace konanix {
     void draw_context_menu(Overlay &overlay);
     VkSampler create_sampler();
     VkImageView create_image_view(VkImage image, VkFormat format);
-    inline VkDeviceSize image_size;
-    inline void* pxdata;
+    // inline VkDeviceSize image_size;
+    // inline void* pxdata;
     
     void recreate_swap_chain();
     void create_descriptor_set();
     void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
 
-    VkCommandBuffer begin_single_time_commands();
-    void end_single_time_commands(VkCommandBuffer &command_buffer);
+    // VkCommandBuffer begin_single_time_commands();
+    // void end_single_time_commands(VkCommandBuffer &command_buffer);
     // void copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height);
     void create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                             VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory);

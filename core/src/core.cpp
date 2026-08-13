@@ -391,10 +391,10 @@ int main(int argc, char *argv[]) {
 
     logger::log("Loading animated GIF...", logger::dbg);
     konanix::g_raw_anim_data = load_gif_animation(path);
-    konanix::image_size = iw*ih*STBI_rgb_alpha;
+    // konanix::image_size = iw*ih*STBI_rgb_alpha;
     
     try {
-        konanix::initialize(konanix::g_raw_anim_data.frames.size(),iw, ih, debug, resizable);
+        konanix::initialize(iw, ih, debug, resizable);
     } catch (std::exception &e) {
         logger::log("Could not initialize Vulkan backend! Exception details: "+std::string(e.what()),logger::err);
         exit(1);
@@ -415,17 +415,17 @@ int main(int argc, char *argv[]) {
     };
 
     sigaction(SIGINT, &sigIntHandler, NULL);
-    size_t frame_index = 0;
+    // size_t frame_index = 0;
     // auto next_frame_time = std::chrono::steady_clock::now() +
     // std::chrono::milliseconds(std::max(1, anim.frames[0].delay_ms));
-    konanix::Overlay ctx; // context menu renderer
-    int outdatedw = iw, outdatedh = ih;
+    // konanix::Overlay ctx; // context menu renderer
+    // int outdatedw = iw, outdatedh = ih;
     logger::log("Initialized!");
     logger::log("Started rendering loop!");
     while (!glfwWindowShouldClose(konanix::globals::window)) {
         // const auto now = std::chrono::steady_clock::now();
         // if (now >= next_frame_time) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(konanix::g_raw_anim_data.frames[frame_index].delay_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(konanix::g_raw_anim_data.frames[/*frame_index*/0].delay_ms));
             // w.upload_rgba_frame_to_gif_image(
             //     anim.frames[frame_index].rgba.data(),
             //     anim.frames[frame_index].rgba.size(),
@@ -433,27 +433,27 @@ int main(int argc, char *argv[]) {
             //     anim.height,
             //     frame_index == 0
             // );
-            frame_index = (frame_index + 1) % konanix::g_raw_anim_data.frames.size();
-            // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
+        //     frame_index = (frame_index + 1) % konanix::g_raw_anim_data.frames.size();
+        //     // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
+        // // }
+        //
+        // glfwGetFramebufferSize(konanix::globals::window, &ctx.w, &ctx.h);
+        //
+        // if (outdatedw != ctx.w || outdatedh != ctx.h) {
+        //     konanix::recreate_swap_chain();
+        //     outdatedw = ctx.w; outdatedh = ctx.h;
         // }
-
-        glfwGetFramebufferSize(konanix::globals::window, &ctx.w, &ctx.h);
-            
-        if (outdatedw != ctx.w || outdatedh != ctx.h) {
-            konanix::recreate_swap_chain();
-            outdatedw = ctx.w; outdatedh = ctx.h;
-        }
-        ctx.storage.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
-        ctx.rgba = ctx.storage.data();
-        ctx.clear();
-        std::vector<uint8_t> overlay_buffer;
-        overlay_buffer.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
-        ctx.rgba = overlay_buffer.data();
-        ctx.clear();
-
-        const auto& src = konanix::g_raw_anim_data.frames[frame_index].rgba;
-        const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
-        memcpy(overlay_buffer.data(), src.data(), copy_bytes);
+        // ctx.storage.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
+        // ctx.rgba = ctx.storage.data();
+        // ctx.clear();
+        // std::vector<uint8_t> overlay_buffer;
+        // overlay_buffer.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
+        // ctx.rgba = overlay_buffer.data();
+        // ctx.clear();
+        //
+        // const auto& src = konanix::g_raw_anim_data.frames[frame_index].rgba;
+        // const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
+        // memcpy(overlay_buffer.data(), src.data(), copy_bytes);
         // ctx.rgba = overlay_buffer.data();
         //
         // konanix::draw_context_menu(ctx);
@@ -465,7 +465,7 @@ int main(int argc, char *argv[]) {
         //     ctx.h,
         //     frame_index == 0
         // );
-        konanix::draw_frame(ctx.w,ctx.h);
+        konanix::draw_frame();
         glfwPollEvents();
     }
 
