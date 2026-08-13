@@ -24,7 +24,6 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
 #ifdef _WIN32
@@ -38,7 +37,19 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
+struct GifFrame {
+    std::vector<uint8_t> rgba;
+    int delay_ms = 100;
+};
+
+struct GifAnimation {
+    int width = 0;
+    int height = 0;
+    std::vector<GifFrame> frames;
+};
+
 namespace konanix {
+    inline GifAnimation g_raw_anim_data;
     inline bool g_swapchain_rebuild = false;
 
     void initialize(const uint32_t gif_frame_count, const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
@@ -46,9 +57,8 @@ namespace konanix {
     void cleanup();
     void draw_frame(int width, int height);
 
-    void create_gif_image(const char** pixels, const uint32_t &frame, uint32_t width, uint32_t height);
+    void create_gif_image(const unsigned char* pixels, const uint32_t &frame, uint32_t width, uint32_t height);
     void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload = false);
-    void initialize_gif_dependencies(const uint32_t &frame_count);
 
     struct Overlay {
         int w = 0;

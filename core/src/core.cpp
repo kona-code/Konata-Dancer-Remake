@@ -31,7 +31,6 @@
 #include <string>
 #include <stdlib.h>
 #include <thread>
-#include <vulkan/vulkan_core.h>
 #include <fstream>
 #include <chrono>
 #include <array>
@@ -56,17 +55,6 @@
 
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
-
-struct GifFrame {
-    std::vector<uint8_t> rgba;
-    int delay_ms = 100;
-};
-
-struct GifAnimation {
-    int width = 0;
-    int height = 0;
-    std::vector<GifFrame> frames;
-};
 
 struct MemoryGifReader {
     const unsigned char *data;
@@ -402,24 +390,23 @@ int main(int argc, char *argv[]) {
     else iw = 640; ih = 480;
 
     logger::log("Loading animated GIF...", logger::dbg);
-    const GifAnimation anim = load_gif_animation(path);
+    konanix::g_raw_anim_data = load_gif_animation(path);
     konanix::image_size = iw*ih*STBI_rgb_alpha;
-    logger::log("Uploading animated GIF...", logger::dbg);
-
-    konanix::initialize_gif_dependencies(anim.frames.size());
-    for (size_t i = 0; i < anim.frames.size(); ++i) {
-        konanix::create_gif_image(i, anim.width, anim.height);
-        stbi_image_free();
-        logger::log("Loaded frame "+std::to_string(i),logger::dbg);
-    }
-    // konanix::create_descriptor_set();
     
     try {
-        konanix::initialize(anim.frames.size(),iw, ih, debug, resizable);
+        konanix::initialize(konanix::g_raw_anim_data.frames.size(),iw, ih, debug, resizable);
     } catch (std::exception &e) {
         logger::log("Could not initialize Vulkan backend! Exception details: "+std::string(e.what()),logger::err);
         exit(1);
     }
+
+    // logger::log("Uploading animated GIF...", logger::dbg);
+
+    // for (size_t i = 0; i < konanix::g_raw_anim_data.frames.size(); ++i) {
+    //     konanix::create_gif_image(konanix::g_raw_anim_data.frames[i].rgba.data(), i, konanix::g_raw_anim_data.width, konanix::g_raw_anim_data.height);
+    //     logger::log("Loaded frame "+std::to_string(i),logger::dbg);
+    // }
+    // konanix::g_raw_anim_data.frames.clear();
 
     struct sigaction sigIntHandler {
         terminate_handler,
@@ -438,7 +425,7 @@ int main(int argc, char *argv[]) {
     while (!glfwWindowShouldClose(konanix::globals::window)) {
         // const auto now = std::chrono::steady_clock::now();
         // if (now >= next_frame_time) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(anim.frames[frame_index].delay_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(konanix::g_raw_anim_data.frames[frame_index].delay_ms));
             // w.upload_rgba_frame_to_gif_image(
             //     anim.frames[frame_index].rgba.data(),
             //     anim.frames[frame_index].rgba.size(),
@@ -446,7 +433,7 @@ int main(int argc, char *argv[]) {
             //     anim.height,
             //     frame_index == 0
             // );
-            frame_index = (frame_index + 1) % anim.frames.size();
+            frame_index = (frame_index + 1) % konanix::g_raw_anim_data.frames.size();
             // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
         // }
 
@@ -464,7 +451,7 @@ int main(int argc, char *argv[]) {
         ctx.rgba = overlay_buffer.data();
         ctx.clear();
 
-        const auto& src = anim.frames[frame_index].rgba;
+        const auto& src = konanix::g_raw_anim_data.frames[frame_index].rgba;
         const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
         memcpy(overlay_buffer.data(), src.data(), copy_bytes);
         // ctx.rgba = overlay_buffer.data();
