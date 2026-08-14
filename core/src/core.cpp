@@ -30,9 +30,7 @@
 #include <stdexcept>
 #include <string>
 #include <stdlib.h>
-#include <thread>
 #include <fstream>
-#include <chrono>
 #include <array>
 #include <filesystem>
 #include <vector>
@@ -40,8 +38,6 @@
 #include <algorithm>
 
 #include <gif_lib.h>
-
-#include "globals/window.h"
 
 // #define STB_ONLY_GIF
 #define STB_IMAGE_IMPLEMENTATION
@@ -415,59 +411,10 @@ int main(int argc, char *argv[]) {
     };
 
     sigaction(SIGINT, &sigIntHandler, NULL);
-    // size_t frame_index = 0;
-    // auto next_frame_time = std::chrono::steady_clock::now() +
-    // std::chrono::milliseconds(std::max(1, anim.frames[0].delay_ms));
-    // konanix::Overlay ctx; // context menu renderer
-    // int outdatedw = iw, outdatedh = ih;
+
     logger::log("Initialized!");
     logger::log("Started rendering loop!");
-    while (!glfwWindowShouldClose(konanix::globals::window)) {
-        // const auto now = std::chrono::steady_clock::now();
-        // if (now >= next_frame_time) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(konanix::g_raw_anim_data.frames[/*frame_index*/0].delay_ms));
-            // w.upload_rgba_frame_to_gif_image(
-            //     anim.frames[frame_index].rgba.data(),
-            //     anim.frames[frame_index].rgba.size(),
-            //     anim.width,
-            //     anim.height,
-            //     frame_index == 0
-            // );
-        //     frame_index = (frame_index + 1) % konanix::g_raw_anim_data.frames.size();
-        //     // next_frame_time = now + std::chrono::milliseconds(std::max(1, anim.frames[frame_index].delay_ms));
-        // // }
-        //
-        // glfwGetFramebufferSize(konanix::globals::window, &ctx.w, &ctx.h);
-        //
-        // if (outdatedw != ctx.w || outdatedh != ctx.h) {
-        //     konanix::recreate_swap_chain();
-        //     outdatedw = ctx.w; outdatedh = ctx.h;
-        // }
-        // ctx.storage.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
-        // ctx.rgba = ctx.storage.data();
-        // ctx.clear();
-        // std::vector<uint8_t> overlay_buffer;
-        // overlay_buffer.assign(size_t(ctx.w) * size_t(ctx.h) * 4, 0);
-        // ctx.rgba = overlay_buffer.data();
-        // ctx.clear();
-        //
-        // const auto& src = konanix::g_raw_anim_data.frames[frame_index].rgba;
-        // const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
-        // memcpy(overlay_buffer.data(), src.data(), copy_bytes);
-        // ctx.rgba = overlay_buffer.data();
-        //
-        // konanix::draw_context_menu(ctx);
-        //
-        // konanix::upload_rgba_frame_to_gif_image(
-        //     ctx.rgba,
-        //     overlay_buffer.size(),
-        //     ctx.w,
-        //     ctx.h,
-        //     frame_index == 0
-        // );
-        konanix::draw_frame();
-        glfwPollEvents();
-    }
+    konanix::render();
 
     konanix::cleanup();
 

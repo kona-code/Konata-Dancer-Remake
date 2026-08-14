@@ -55,17 +55,16 @@ namespace konanix {
     void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
     void cleanup();
     void draw_frame();
+    void render();
 
     void create_gif_image(const unsigned char* pixels, const uint32_t &frame, uint32_t width, uint32_t height);
-    void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload = false);
+    void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes);
 
-    struct Overlay {
-        int w = 0;
-        int h = 0;
-        std::vector<uint8_t> storage;
-        uint8_t* rgba = nullptr;
+    namespace overlay {
+        inline std::vector<uint8_t> storage;
+        inline uint8_t* rgba;
     
-        void clear() {
+        inline void clear() {
             if (!rgba) return;
             std::fill(storage.begin(), storage.end(), 0);
         }
@@ -76,9 +75,7 @@ namespace konanix {
         void draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
         void draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
     };
-    void draw_context_menu(Overlay &overlay);
-    VkSampler create_sampler();
-    VkImageView create_image_view(VkImage image, VkFormat format);
+    void draw_context_menu();
     // inline VkDeviceSize image_size;
     // inline void* pxdata;
     
@@ -89,8 +86,6 @@ namespace konanix {
     // VkCommandBuffer begin_single_time_commands();
     // void end_single_time_commands(VkCommandBuffer &command_buffer);
     // void copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height);
-    void create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
-                            VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory);
 
 
 };

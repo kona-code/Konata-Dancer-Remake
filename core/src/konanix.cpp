@@ -35,6 +35,7 @@
 #include <string>
 #include <sys/types.h>
 #include <vector>
+#include <thread>
 #include <vulkan/vulkan_core.h>
 #include <GLFW/glfw3.h>
 
@@ -78,6 +79,7 @@ struct gif_frame {
 
 VkSampler                               g_gif_sampler                   = nullptr;
 
+static gif_frame                        active_frame                    = {};
 static std::vector<gif_frame>           gif_frames;
 
 #ifdef KONANIX_BUILD_WITH_VALIDATION
@@ -127,9 +129,9 @@ struct QueueFamilyIndices {
 // drawing functions
 // ---------------------------------------------------------------------------
 
-void konanix::Overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    if (x < 0 || y < 0 || x >= w || y >= h) return;
-    size_t i = (size_t(y) * size_t(w) + size_t(x)) * 4;
+void konanix::overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    if (x < 0 || y < 0 || x >= globals::width || y >= globals::height) return;
+    size_t i = (size_t(y) * size_t(globals::width) + size_t(x)) * 4;
     float sa = a / 255.0f;
     float da = rgba[i + 3] / 255.0f;
     float outA = sa + da * (1.0f - sa);
@@ -152,7 +154,7 @@ void konanix::Overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, 
     rgba[i + 3] = (uint8_t)(outA * 255.0f + 0.5f);
 }
 
-void konanix::Overlay::rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+void konanix::overlay::rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     for (int yy = 0; yy < rh; ++yy) {
         for (int xx = 0; xx < rw; ++xx) {
             set_pixel(x + xx, y + yy, r, g, b, a);
@@ -160,7 +162,7 @@ void konanix::Overlay::rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, 
     }
 }
 
-void konanix::Overlay::stroke_rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+void konanix::overlay::stroke_rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     rect(x, y, rw, 1, r, g, b, a);
     rect(x, y + rh - 1, rw, 1, r, g, b, a);
     rect(x, y, 1, rh, r, g, b, a);
@@ -185,7 +187,7 @@ std::array<uint8_t, 7> glyph(char c) {
     }
 }
 
-void konanix::Overlay::draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
+void konanix::overlay::draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
     c = (char)std::toupper((unsigned char)c);
     auto g7 = glyph(c);
     for (int row = 0; row < 7; ++row) {
@@ -196,7 +198,7 @@ void konanix::Overlay::draw_char(int x, int y, char c, uint8_t r, uint8_t g, uin
         }
     }
 }
-void konanix::Overlay::draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
+void konanix::overlay::draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
     int cx = x;
     for (char c : s) {
         draw_char(cx, y, c, r, g, b, a, scale);
@@ -236,23 +238,23 @@ static constexpr double kPad     = 6.0;
 static ContextMenu g_menu;
 static DragState g_drag;
 
-void konanix::draw_context_menu(konanix::Overlay &ov) {
+void konanix::draw_context_menu() {
     if (!g_menu.visible) return;
 
     int x = (int)g_menu.x;
     int y = (int)g_menu.y;
     int h = kItemH * (int)g_menu.items.size();
 
-    ov.rect(x, y,kMenuW, h, 28, 28, 28, 230);
-    ov.stroke_rect(x, y, kMenuW, h, 90, 90, 90, 255);
+    overlay::rect(x, y,kMenuW, h, 28, 28, 28, 230);
+    overlay::stroke_rect(x, y, kMenuW, h, 90, 90, 90, 255);
 
     for (int i = 0; i < (int)g_menu.items.size(); ++i) {
         int iy = y + i * kItemH;
         if (i == g_menu.hovered) {
-            ov.rect(x + 1, iy + 1, kMenuW - 2, kItemH - 2, 70, 70, 70, 255);
+            overlay::rect(x + 1, iy + 1, kMenuW - 2, kItemH - 2, 70, 70, 70, 255);
         }
 
-        ov.draw_text(x + kPad, iy + 6, g_menu.items[i].label, 235, 235, 235, 255, 2);
+        overlay::draw_text(x + kPad, iy + 6, g_menu.items[i].label, 235, 235, 235, 255, 2);
     }
 }
 
@@ -749,7 +751,9 @@ static void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryP
 // ---------------------------------------------------------------------------
 
 static void framebuffer_resize_callback(GLFWwindow* window, int width, int height) {
-   g_swapchain_rebuild = true; 
+   g_swapchain_rebuild = true;
+   globals::width = width;
+   globals::height = height;
 };
 
 // ---------------------------------------------------------------------------
@@ -767,6 +771,7 @@ static void create_window() {
 
     glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
     glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
+    glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
     if (!RESIZABLE)
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -1569,7 +1574,7 @@ static void create_command_pool() {
 // image-based functions
 // ---------------------------------------------------------------------------
 
-void konanix::create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
+static void create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                             VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &image_memory) {
     const VkImageCreateInfo image_info {
         VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -1622,7 +1627,7 @@ void konanix::create_image(uint32_t width, uint32_t height, VkFormat format, VkI
     logger::log("Allocated memory for Vulkan image!",logger::dbg);
 }
 
-VkImageView konanix::create_image_view(VkImage image, VkFormat format) {
+static VkImageView create_image_view(VkImage image, VkFormat format) {
     const VkImageViewCreateInfo view_info {
         VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         VK_NULL_HANDLE,
@@ -1654,7 +1659,7 @@ VkImageView konanix::create_image_view(VkImage image, VkFormat format) {
     return image_view;
 }
 
-VkSampler konanix::create_sampler() {
+static VkSampler create_sampler() {
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(globals::device::physical_device,&properties);
 
@@ -1834,7 +1839,7 @@ static void copy_buffer_to_image(
     end_single_time_commands(cmd);
 }
 
-void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes, uint32_t width, uint32_t height, bool first_upload) {
+void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes) {
     VkBuffer staging_buffer = VK_NULL_HANDLE;
     VkDeviceMemory staging_memory = VK_NULL_HANDLE;
 
@@ -1858,20 +1863,20 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
     vkUnmapMemory(globals::device::device, staging_memory);
 
     transition_image_layout(
-        gif_frames[current_gif_frame].image,
+        active_frame.image,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     );
 
     copy_buffer_to_image(
         staging_buffer,
-        gif_frames[current_gif_frame].image,
-        width,
-        height
+        active_frame.image,
+        globals::width,
+        globals::height
     );
 
     transition_image_layout(
-        gif_frames[current_gif_frame].image,
+        active_frame.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
@@ -2061,7 +2066,7 @@ void konanix::create_gif_image(const unsigned char *pixels, const uint32_t &fram
     // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     // gif_frames[frame].image,gif_frames[frame].image_memory);
     //
-    gif_frames[frame].image_view = konanix::create_image_view(gif_frames[frame].image,VK_FORMAT_R8G8B8A8_SRGB);
+    gif_frames[frame].image_view = create_image_view(gif_frames[frame].image,VK_FORMAT_R8G8B8A8_SRGB);
 
 
     // transition_image_layout(g_gif_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -2247,6 +2252,8 @@ void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug
         konanix::create_gif_image(konanix::g_raw_anim_data.frames[i].rgba.data(), i, konanix::g_raw_anim_data.width, konanix::g_raw_anim_data.height);
         // logger::log("Loaded frame "+std::to_string(i),logger::dbg);
     }
+
+    // konanix::g_raw_anim_data.frames.clear();
 
     g_gif_sampler = create_sampler();
 
@@ -2536,6 +2543,9 @@ void konanix::draw_frame() {
     globals::time::elapsed = std::chrono::duration<float>(time_now - globals::time::start).count();
    
     set_gif_frame(current_gif_frame);
+
+    
+
     logger::log("<konanix> Rendering GIF frame #"+std::to_string(current_gif_frame),logger::dbg);
 
     record_command_buffer(globals::command::buffers[current_frame], image_index);
@@ -2592,3 +2602,58 @@ void konanix::draw_frame() {
     // logger::log("Current frame: "+std::to_string(current_frame));
 
 };
+
+void konanix::render() {
+
+    active_frame.image = gif_frames[0].image;
+    active_frame.image_view = gif_frames[0].image_view;
+
+    const VkDescriptorImageInfo image_info{
+        g_gif_sampler,
+        active_frame.image_view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    const VkWriteDescriptorSet write {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = globals::descriptor::sets[current_frame],
+        .dstBinding = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &image_info
+    };
+
+    vkUpdateDescriptorSets(globals::device::device, 1, &write, 0, nullptr);
+
+    // std::vector<int> frame_delays_ms(g_raw_anim_data.frames.size());
+    int delay_ms = g_raw_anim_data.frames[0].delay_ms;
+    konanix::g_raw_anim_data.frames.clear();
+    while (!glfwWindowShouldClose(konanix::globals::window)) {
+        // std::this_thread::sleep_for(std::chrono::milliseconds(konanix::g_raw_anim_data.frames[/*frame_index*/0].delay_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+
+        // set_gif_frame(current_gif_frame);
+        // active_frame = gif_frames[current_gif_frame];
+        //
+        // overlay::storage.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
+        // overlay::rgba = overlay::storage.data();
+        // overlay::clear();
+        // std::vector<uint8_t> overlay_buffer;
+        // overlay_buffer.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
+        // overlay::rgba = overlay_buffer.data();
+        // overlay::clear();
+        //
+        // // const auto& src = konanix::g_raw_anim_data.frames[current_gif_frame].rgba;
+        // // const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
+        // // memcpy(overlay_buffer.data(), src.data(), copy_bytes);
+        // // overlay::rgba = overlay_buffer.data();
+        // //
+        // konanix::draw_context_menu();
+        // konanix::upload_rgba_frame_to_gif_image(overlay::rgba, overlay_buffer.size());
+        konanix::draw_frame();
+        glfwPollEvents();
+    }
+
+
+
+}
