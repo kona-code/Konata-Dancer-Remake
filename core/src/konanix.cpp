@@ -1231,132 +1231,26 @@ void set_gif_frame(uint32_t frame)
 // fixed functions
 // ---------------------------------------------------------------------------
 
-static void create_render_pass() {
-    logger::log("<konanix> Creating the render pass...",logger::dbg);
-    // comments from https://vulkan-tutorial.com/en/Drawing_a_triangle/Graphics_pipeline_basics/Render_passes
-    const VkAttachmentDescription color_attachment {
-        .flags = 0,
-        .format = globals::swapchain::format,
-        .samples = g_msaa_samples,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-
-        // VK_ATTACHMENT_LOAD_OP_LOAD,                              // Preserve the existing contents of the attachment
-        // VK_ATTACHMENT_LOAD_OP_CLEAR,                             // Clear the values to a constant at the start
-        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,           // Existing contents are undefined; don't care about them
-
-        // VK_ATTACHMENT_STORE_OP_STORE,                            // Rendered contents will be stored in memory and can be read later
-        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,         // Contents of the framebuffer will be undefined after the rendering operation
-
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-
-        // .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL  // Images used as color attachment
-        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR              // Images to be presented in the swap chain
-        // VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,                    // Images to be used as destination for a memory copy operation
-    };
-
-    const VkAttachmentDescription color_attachment_resolve {    // due to .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-        .flags =0,
-
-        .format = globals::swapchain::format,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-
-        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        
-        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-
-        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-    };
-
-    constexpr VkAttachmentReference color_attachment_ref {
-        .attachment = 0,
-        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-    };
-
-    // for later:
-    // The following other types of attachments can be referenced by a subpass:
-
-    // pInputAttachments: Attachments that are read from a shader
-    // pResolveAttachments: Attachments used for multisampling color attachments
-    // pDepthStencilAttachment: Attachment for depth and stencil data
-    // pPreserveAttachments: Attachments that are not used by this subpass, but for which the data must be preserved
-
-    const VkSubpassDescription subpass {
-        .flags = 0,
-
-        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-
-        .inputAttachmentCount = 0,
-        .pInputAttachments = nullptr,
-
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &color_attachment_ref,
-        .pResolveAttachments = nullptr,
-        .pDepthStencilAttachment = nullptr 
-    };
-
-    constexpr VkSubpassDependency dependency {
-        .srcSubpass = VK_SUBPASS_EXTERNAL,
-        .dstSubpass = 0,
-
-        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-
-        // VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, // .srcAccessMask
-        // .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        // .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-    };
-
-    const VkRenderPassCreateInfo renderpass_info {
-        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-
-        .attachmentCount = 1,
-        .pAttachments = &color_attachment,
-
-        .subpassCount = 1,
-        .pSubpasses = &subpass,
-
-        .dependencyCount = 1,
-        .pDependencies = &dependency
-    };
-
-    if (vkCreateRenderPass(globals::device::device, &renderpass_info, nullptr, &globals::pipeline::renderpass) != VK_SUCCESS) {
-        logger::log("<konanix> Failed to create render pass!",logger::exc);
-        throw std::runtime_error("failed to create render pass");
-    }
-
-    logger::log("<konanix> Render pass created!",logger::dbg);
-}
-
 static void create_graphics_pipeline() {
-    logger::log("<konanix> Creating the graphics pipeline...",logger::dbg);
-
-    // VkShaderModule v_shadermodule = create_shader_module(globals::device::device,read_file("shaders/vert.spv"));
-    // VkShaderModule f_shadermodule = create_shader_module(globals::device::device,read_file("shaders/frag.spv"));
+    logger::log("<Vulkan> Creating the graphics pipeline...",logger::dbg);
 
     const VkShaderModuleCreateInfo vertex_info {
-        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .codeSize = vert_spv_len,
-        .pCode = reinterpret_cast<const uint32_t*>(vert_spv)
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        vert_spv_len,
+        reinterpret_cast<const uint32_t*>(vert_spv)
     };
 
     VkShaderModule vertex_shader;
-        if (vkCreateShaderModule(globals::device::device, &vertex_info, nullptr, &vertex_shader)) {
-        logger::log("<konanix> Failed to create the vertex shader module!",logger::exc);
+    if (vkCreateShaderModule(globals::device::device, &vertex_info, nullptr, &vertex_shader)) {
+        logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
         throw std::runtime_error("failed to create a shader module");
     }
 
     const VkShaderModuleCreateInfo fragment_info {
         VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        nullptr,
+        VK_NULL_HANDLE,
         0,
         frag_spv_len,
         reinterpret_cast<const uint32_t*>(frag_spv)
@@ -1364,213 +1258,263 @@ static void create_graphics_pipeline() {
 
     VkShaderModule fragment_shader;
     if (vkCreateShaderModule(globals::device::device, &fragment_info, nullptr, &fragment_shader)) {
-        logger::log("<konanix> Failed to create the fragment shader module!",logger::exc);
+        logger::log("<Vulkan> Failed to create a shader module!",logger::exc);
         throw std::runtime_error("failed to create a shader module");
     }
 
-     VkPipelineShaderStageCreateInfo v_shader_info{};
-     v_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-     v_shader_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
-     v_shader_info.module = vertex_shader;
-     v_shader_info.pName = "main";
+        VkPipelineShaderStageCreateInfo v_shader_info{};
+        v_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        v_shader_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        v_shader_info.module = vertex_shader;
+        v_shader_info.pName = "main";
 
-     VkPipelineShaderStageCreateInfo f_shader_info{};
-     f_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-     f_shader_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-     f_shader_info.module = fragment_shader;
-     f_shader_info.pName = "main";
+        VkPipelineShaderStageCreateInfo f_shader_info{};
+        f_shader_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        f_shader_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        f_shader_info.module = fragment_shader;
+        f_shader_info.pName = "main";
 
-    const VkPipelineShaderStageCreateInfo shader_stages[] = {v_shader_info,f_shader_info};
-    logger::log("<konanix> Pipeline shader stages set!",logger::dbg);
+
+    const VkPipelineShaderStageCreateInfo shader_stages[2] = {v_shader_info,f_shader_info};
+    logger::log("<Vulkan> Pipeline shader stages set!",logger::dbg);
     
-    const std::vector<VkDynamicState> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR/*, VK_DYNAMIC_STATE_LINE_WIDTH*/};
+    const std::vector<VkDynamicState> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     const VkPipelineDynamicStateCreateInfo dynamic_state {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-
-        .dynamicStateCount = static_cast<uint32_t>(dynamic_states.size()),
-        .pDynamicStates = dynamic_states.data()
+        VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        static_cast<uint32_t>(dynamic_states.size()),
+        dynamic_states.data()
     };
 
     const VkPipelineVertexInputStateCreateInfo vertex_input_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        
-        .vertexBindingDescriptionCount = 0,
-        .pVertexBindingDescriptions = nullptr,
-
-        .vertexAttributeDescriptionCount = 0, 
-        .pVertexAttributeDescriptions = nullptr
+        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr
     };
 
     constexpr VkPipelineInputAssemblyStateCreateInfo input_assembly_state_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        
-        // from https://vulkan-tutorial.com/en/Drawing_a_triangle/Graphics_pipeline_basics/Fixed_functions
-        // VK_PRIMITIVE_TOPOLOGY_POINT_LIST,        // points from vertices
-        // VK_PRIMITIVE_TOPOLOGY_LINE_LIST,         // line from every 2 vertices without reuse
-        // VK_PRIMITIVE_TOPOLOGY_LINE_STRIP,        // the end vertex of every line is used as start vertex for the next line
-        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,        // triangle from every 3 vertices without reuse
-        // VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,    // the second and third vertex of every triangle are used as first two vertices of the next triangle
+        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
 
-        .primitiveRestartEnable = VK_FALSE
+        VK_FALSE
     };
 
     const VkViewport viewport {
-        .x = 0.0f,
-        .y = 0.0f,
-        .width = (float) globals::swapchain::extent.width,
-        .height = (float) globals::swapchain::extent.height,
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f
+        0.0f,
+        0.0f,
+        (float) globals::swapchain::extent.width,
+        (float) globals::swapchain::extent.height,
+        0.0f,
+        1.0f
     };
 
     const VkRect2D scissor {
-        .offset = {0,0},
-        .extent = globals::swapchain::extent
+        {0,0},
+            globals::swapchain::extent
     };
 
     const VkPipelineViewportStateCreateInfo viewport_state_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
+        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
         
-        .viewportCount = 1,
-        .pViewports = &viewport,
+        1,
+        &viewport,
         
-        .scissorCount = 1,
-        .pScissors = &scissor
+        1,
+        &scissor
     };
 
 
     const VkPipelineRasterizationStateCreateInfo rasterizer {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-
-        .depthClampEnable = VK_FALSE,
-        .rasterizerDiscardEnable = VK_FALSE,
-        
-        .polygonMode = VK_POLYGON_MODE_FILL,
-        .cullMode = VK_CULL_MODE_BACK_BIT,
-
-        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-
-        .depthBiasEnable = VK_FALSE,
-        .depthBiasConstantFactor = 1.0f,
-        .depthBiasClamp = 0.0f,
-        .depthBiasSlopeFactor = 0.0f,
-        .lineWidth = 1.0f
+        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        VK_FALSE,VK_FALSE,
+        VK_POLYGON_MODE_FILL,
+        0,
+        VK_FRONT_FACE_CLOCKWISE,
+        VK_FALSE,
+        1.0f,
+        0.0f,
+        0.0f,
+        1.0f
     };
 
 
-    const VkPipelineMultisampleStateCreateInfo multisampling {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .rasterizationSamples = g_msaa_samples,
-        .sampleShadingEnable = VK_TRUE,
-        .minSampleShading = 0.2f,
-        .pSampleMask = nullptr,
-        .alphaToCoverageEnable = VK_FALSE,
-        .alphaToOneEnable = VK_FALSE
+    constexpr VkPipelineMultisampleStateCreateInfo multisampling {
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+        VK_SAMPLE_COUNT_1_BIT,
+        VK_FALSE,
+        1.0f,
+        nullptr,
+        VK_FALSE,
+        VK_FALSE
     };
 
 
     constexpr VkPipelineColorBlendAttachmentState color_blend_attachment {
-        .blendEnable = VK_TRUE,
-        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        .colorBlendOp = VK_BLEND_OP_ADD,
+        VK_TRUE,
+        VK_BLEND_FACTOR_SRC_ALPHA,
+        VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        VK_BLEND_OP_ADD,
         // VK_FALSE,
         // VK_BLEND_FACTOR_ONE,
         // VK_BLEND_FACTOR_ZERO,
         // VK_BLEND_OP_ADD,
 
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-        .alphaBlendOp = VK_BLEND_OP_ADD,
+        VK_BLEND_FACTOR_ONE,
+        VK_BLEND_FACTOR_ZERO,
+        VK_BLEND_OP_ADD,
 
-        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
     }; 
 
     const VkPipelineColorBlendStateCreateInfo color_blending {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
+        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
 
-        .logicOpEnable = VK_FALSE,
-        .logicOp = VK_LOGIC_OP_COPY,
-        .attachmentCount = 1,
-        .pAttachments = &color_blend_attachment,
+        VK_FALSE,
+        VK_LOGIC_OP_COPY,
+        1,
+        &color_blend_attachment,
         
-        .blendConstants = {
+        {
             0.0f, 0.0f, 0.0f, 0.0f
         }
     };
 
     const VkPipelineLayoutCreateInfo pipeline_layout_info {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
+        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
 
         // 0,
         // nullptr,
-        .setLayoutCount = 1,
-        .pSetLayouts = &globals::descriptor::layout,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = nullptr
+        1,
+        &globals::descriptor::layout,
+        0,
+        nullptr
     };
 
-    if (vkCreatePipelineLayout(globals::device::device,&pipeline_layout_info,nullptr,&/*g_pipeline_layout*/ globals::pipeline::graphics_pipeline_layout) != VK_SUCCESS) {
-        logger::log("<konanix> Failed to create the pipeline layout!",logger::exc);
+    if (vkCreatePipelineLayout(globals::device::device,&pipeline_layout_info,nullptr,&globals::pipeline::graphics_pipeline_layout) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to create the pipeline layout!",logger::exc);
         throw std::runtime_error("failed to create the pipeline layout");
     }
 
-    logger::log("<konanix> Creating graphics pipeline object...",logger::dbg);
+    logger::log("<Vulkan> Creating graphics pipeline object...",logger::dbg);
 
     const VkGraphicsPipelineCreateInfo pipeline_info {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
+        VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
 
-        .stageCount = 2,
-        .pStages = shader_stages,
-        .pVertexInputState = &vertex_input_info,
-        .pInputAssemblyState = &input_assembly_state_info,
-        .pTessellationState = nullptr,
-        .pViewportState = &viewport_state_info,
-        .pRasterizationState = &rasterizer,
-        .pMultisampleState = &multisampling,
-        .pDepthStencilState = nullptr, // &depth_stencil, // not used with single object
-        .pColorBlendState = &color_blending,
-        .pDynamicState = &dynamic_state,
+        2,
+        shader_stages,
+        &vertex_input_info,
+        &input_assembly_state_info,
+        VK_NULL_HANDLE,
+        &viewport_state_info,
+        &rasterizer,
+        &multisampling,
+        nullptr,
+        &color_blending,
+        &dynamic_state,
 
-        /*g_pipeline_layout*/ 
-        .layout = globals::pipeline::graphics_pipeline_layout,
-        .renderPass = globals::pipeline::renderpass,
-        .subpass = 0,
+        globals::pipeline::graphics_pipeline_layout,
+        globals::pipeline::renderpass,
+        0,
 
-        .basePipelineHandle = nullptr,
-        .basePipelineIndex = -1
+        VK_NULL_HANDLE,
+        -1
     };
 
-    if (vkCreateGraphicsPipelines(globals::device::device, nullptr, 1, &pipeline_info, nullptr, &globals::pipeline::graphics_pipeline) != VK_SUCCESS) {
-        logger::log("<konanix> Failed to create the graphics pipeline!",logger::exc);
+    if (vkCreateGraphicsPipelines(globals::device::device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &globals::pipeline::graphics_pipeline) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to create the graphics pipeline!",logger::exc);
         throw std::runtime_error("failed to create the graphics pipeline");
     }
 
-    logger::log("<konanix> Graphics pipeline created! Cleaning shader data...",logger::dbg);
-    // vkDestroyShaderModule(globals::device::device,v_shadermodule,nullptr);
-    // vkDestroyShaderModule(globals::device::device,f_shadermodule,nullptr);
+    logger::log("<Vulkan> Graphics pipeline created! Cleaning shader data...",logger::dbg);
     vkDestroyShaderModule(globals::device::device,fragment_shader,nullptr);
     vkDestroyShaderModule(globals::device::device,vertex_shader,nullptr);
 
-    logger::log("<konanix> Graphics pipeline created!",logger::dbg);
+    logger::log("<Vulkan> Graphics pipeline created!",logger::dbg);
+}
+
+static void create_render_pass() {
+    logger::log("<Vulkan> Creating the render pass...",logger::dbg);
+    // comments from https://vulkan-tutorial.com/en/Drawing_a_triangle/Graphics_pipeline_basics/Render_passes
+    const VkAttachmentDescription color_attachment {
+        0,
+        globals::swapchain::format,
+        VK_SAMPLE_COUNT_1_BIT,
+        VK_ATTACHMENT_LOAD_OP_CLEAR,
+        VK_ATTACHMENT_STORE_OP_STORE,
+        VK_ATTACHMENT_LOAD_OP_DONT_CARE,     // Existing contents are undefined; don't care about them
+        VK_ATTACHMENT_STORE_OP_DONT_CARE,   // Contents of the framebuffer will be undefined after the rendering operation
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR        // Images to be presented in the swap chain
+    };
+
+    constexpr VkAttachmentReference color_attachment_ref {
+        0,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    };
+
+    const VkSubpassDescription subpass {
+        0,
+
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        0,
+        VK_NULL_HANDLE,
+        1,
+        &color_attachment_ref
+    };
+
+    constexpr VkSubpassDependency dependency {
+        VK_SUBPASS_EXTERNAL,
+        0,
+
+
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+
+        // VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, // .srcAccessMask
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    };
+
+    const VkRenderPassCreateInfo renderpass_info {
+        VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        VK_NULL_HANDLE,
+        0,
+
+        1,
+        &color_attachment,
+
+        1,
+        &subpass,
+
+        1,
+        &dependency
+    };
+
+    if (vkCreateRenderPass(globals::device::device, &renderpass_info, nullptr, &globals::pipeline::renderpass) != VK_SUCCESS) {
+        logger::log("<Vulkan> Failed to create render pass!",logger::exc);
+        throw std::runtime_error("failed to create render pass");
+    }
+
+    logger::log("<Vulkan> Render pass created!",logger::dbg);
 }
 
 static void create_framebuffers() {
@@ -2117,7 +2061,7 @@ void konanix::create_gif_image(const unsigned char *pixels, const uint32_t &fram
     // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     // gif_frames[frame].image,gif_frames[frame].image_memory);
     //
-    gif_frames[frame].image_view = konanix::create_image_view(gif_frames[frame].image,globals::swapchain::format);
+    gif_frames[frame].image_view = konanix::create_image_view(gif_frames[frame].image,VK_FORMAT_R8G8B8A8_SRGB);
 
 
     // transition_image_layout(g_gif_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
