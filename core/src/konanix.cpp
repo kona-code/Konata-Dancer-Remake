@@ -36,8 +36,23 @@
 #include <sys/types.h>
 #include <vector>
 #include <thread>
-#include <vulkan/vulkan_core.h>
+
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif defined (__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#else
+#define GLFW_EXPOSE_NATIVE_X11
+#include <X11/Xlib.h>
+#include <X11/extensions/shape.h>
+#include <X11/extensions/Xfixes.h>
+
+#define GLFW_EXPOSE_NATIVE_WAYLAND
+#include <wayland-client.h>
+#endif
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 
 #include "./util/logger.h"
 
@@ -55,6 +70,8 @@
 
 #include "./shaders/frag.c"
 #include "./shaders/vert.c"
+
+// #define KONANIX_USE_IMAGE_SWAP_MECHANISM
 
 using namespace konanix;
 
@@ -95,8 +112,10 @@ struct gif_frame {
 
 VkSampler                               g_gif_sampler                   = nullptr;
 
-static gif_frame                        active_frame                    = {};
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
 static std::vector<gif_frame>           gif_frames;
+#endif
+static gif_frame                        active_frame                    = {};
 
 #ifdef KONANIX_BUILD_WITH_VALIDATION
 static VkDebugUtilsMessengerEXT         g_debug_messenger               = nullptr;
@@ -334,6 +353,10 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
         g_menu.hovered = menu_item_at(xpos, ypos);
 
 }
+
+// ---------------------------------------------------------------------------
+// window pass-through calls
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // miscellaneous vulkan helpers
@@ -1147,7 +1170,11 @@ static void create_descriptor_set() {
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         const VkDescriptorImageInfo image_info{
             g_gif_sampler,
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
             gif_frames[0].image_view,
+#else
+            active_frame.image_view,
+#endif
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         };
 
@@ -1204,7 +1231,11 @@ static void update_descriptor_set() {
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         const VkDescriptorImageInfo image_info {
             g_gif_sampler,
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
             gif_frames[0].image_view,
+#else
+            active_frame.image_view,
+#endif        
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         };
 
@@ -1232,7 +1263,11 @@ void set_gif_frame(uint32_t frame)
 {
     const VkDescriptorImageInfo image_info{
         g_gif_sampler,
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM       
         gif_frames[frame].image_view,
+#else
+        active_frame.image_view,
+#endif
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
 
@@ -2061,14 +2096,24 @@ static void create_gif_image(const unsigned char *pixels, const uint32_t &frame,
         VK_FORMAT_R8G8B8A8_SRGB,
         VK_IMAGE_TILING_OPTIMAL,VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
         gif_frames[frame].image, gif_frames[frame].image_memory
+#else
+        active_frame.image, active_frame.image_memory
+#endif
     );
 
     VkCommandBuffer cmd = begin_single_time_commands();
 
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
     transition_image_layout(cmd,gif_frames[frame].image,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1);
     copy_buffer_to_image(cmd,staging_buffer,gif_frames[frame].image,static_cast<uint32_t>(width),static_cast<uint32_t>(height));
     transition_image_layout(cmd,gif_frames[frame].image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
+#else
+    transition_image_layout(cmd,active_frame.image,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1);
+    copy_buffer_to_image(cmd,staging_buffer,active_frame.image,static_cast<uint32_t>(width),static_cast<uint32_t>(height));
+    transition_image_layout(cmd,active_frame.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
+#endif
     // generate_mipmaps(cmd, image, VK_FORMAT_R8G8B8A8_SRGB, t_width, t_height, 1);
 
     end_single_time_commands(cmd);
@@ -2081,9 +2126,12 @@ static void create_gif_image(const unsigned char *pixels, const uint32_t &frame,
     // VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
     // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     // gif_frames[frame].image,gif_frames[frame].image_memory);
-    //
-    gif_frames[frame].image_view = create_image_view(gif_frames[frame].image,VK_FORMAT_R8G8B8A8_SRGB);
 
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
+    gif_frames[frame].image_view = create_image_view(gif_frames[frame].image,VK_FORMAT_R8G8B8A8_SRGB);
+#else
+    active_frame.image_view = create_image_view(active_frame.image,VK_FORMAT_R8G8B8A8_SRGB);
+#endif
 
     // transition_image_layout(g_gif_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
@@ -2238,9 +2286,11 @@ void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug
     DEBUG = debug;
     RESIZABLE = resizable;
 
+    GIF_FRAME_COUNT = static_cast<uint32_t>(konanix::gif_data.frames.size());
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
     gif_frames.clear();
-    GIF_FRAME_COUNT = static_cast<uint32_t>(konanix::g_raw_anim_data.frames.size());
     gif_frames.resize(GIF_FRAME_COUNT);
+#endif
 
     create_window();
     create_instance();
@@ -2264,12 +2314,12 @@ void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug
 
     // create_gif_image(0,globals::width, globals::height);
 
-    for (size_t i = 0; i < konanix::g_raw_anim_data.frames.size(); ++i) {
-        create_gif_image(konanix::g_raw_anim_data.frames[i].rgba.data(), i, konanix::g_raw_anim_data.width, konanix::g_raw_anim_data.height);
+    for (size_t i = 0; i < konanix::gif_data.frames.size(); ++i) {
+        create_gif_image(konanix::gif_data.frames[i].rgba.data(), i, konanix::gif_data.width, konanix::gif_data.height);
         // logger::log("Loaded frame "+std::to_string(i),logger::dbg);
     }
 
-    // konanix::g_raw_anim_data.frames.clear();
+    // konanix::gif_data.frames.clear();
 
     g_gif_sampler = create_sampler();
 
@@ -2399,6 +2449,7 @@ void konanix::cleanup() {
        logger::log("<konanix> GIF sampler destroyed!",logger::dbg);
     }
 
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
     logger::log("<konanix> Cleaning "+std::to_string(gif_frames.size())+" frames...",logger::dbg);
     for (size_t i = 0; i < gif_frames.size(); ++i) {
             
@@ -2416,6 +2467,8 @@ void konanix::cleanup() {
         // logger::log("<konanix> GIF image memory "+std::to_string(i)+"/"+std::to_string(gif_frames.size())+" freed up!",logger::dbg);
 
     }
+#endif
+
     logger::log("<konanix> GIF frames cleaned up!",logger::dbg);
 
     if (globals::device::device) {
@@ -2557,10 +2610,10 @@ void konanix::draw_frame() {
     globals::time::delta_time = std::chrono::duration<float>(time_now - globals::time::last_frame).count();
     globals::time::last_frame = time_now;
     globals::time::elapsed = std::chrono::duration<float>(time_now - globals::time::start).count();
-   
-    set_gif_frame(current_gif_frame);
-
     
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM 
+    set_gif_frame(current_gif_frame);
+#endif
 
     logger::log("<konanix> Rendering GIF frame #"+std::to_string(current_gif_frame),logger::dbg);
 
@@ -2619,8 +2672,9 @@ void konanix::draw_frame() {
 
 };
 
-void konanix::render() {
+void konanix::render(uint32_t custom_delay) {
 
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
     active_frame.image = gif_frames[0].image;
     active_frame.image_view = gif_frames[0].image_view;
 
@@ -2641,31 +2695,40 @@ void konanix::render() {
 
     vkUpdateDescriptorSets(globals::device::device, 1, &write, 0, nullptr);
 
-    // std::vector<int> frame_delays_ms(g_raw_anim_data.frames.size());
-    int delay_ms = g_raw_anim_data.frames[0].delay_ms;
-    konanix::g_raw_anim_data.frames.clear();
+    int delay_ms;
+    if (custom_delay == 0)  delay_ms = gif_data.frames[0].delay_ms;
+    else                    delay_ms = std::move(custom_delay);
+
+    konanix::gif_data.frames.clear();
+#endif
+
     while (!glfwWindowShouldClose(konanix::globals::window)) {
-        // std::this_thread::sleep_for(std::chrono::milliseconds(konanix::g_raw_anim_data.frames[/*frame_index*/0].delay_ms));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(konanix::gif_data.frames[/*frame_index*/0].delay_ms));
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
         std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(konanix::gif_data.frames[current_gif_frame].delay_ms));
 
         // set_gif_frame(current_gif_frame);
-        // active_frame = gif_frames[current_gif_frame];
-        //
-        // overlay::storage.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
-        // overlay::rgba = overlay::storage.data();
+
+        overlay::storage.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
+        overlay::rgba = overlay::storage.data();
         // overlay::clear();
-        // std::vector<uint8_t> overlay_buffer;
-        // overlay_buffer.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
-        // overlay::rgba = overlay_buffer.data();
+        std::vector<uint8_t> overlay_buffer;
+        overlay_buffer.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
+        overlay::rgba = overlay_buffer.data();
         // overlay::clear();
+
+        const auto& src = konanix::gif_data.frames[current_gif_frame].rgba;
+        const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
+        memcpy(overlay_buffer.data(), src.data(), copy_bytes);
+        overlay::rgba = overlay_buffer.data();
         //
-        // // const auto& src = konanix::g_raw_anim_data.frames[current_gif_frame].rgba;
-        // // const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
-        // // memcpy(overlay_buffer.data(), src.data(), copy_bytes);
-        // // overlay::rgba = overlay_buffer.data();
-        // //
-        // konanix::draw_context_menu();
-        // konanix::upload_rgba_frame_to_gif_image(overlay::rgba, overlay_buffer.size());
+        // draw_context_menu();
+        upload_rgba_frame_to_gif_image(overlay::rgba, overlay_buffer.size());
+
+
+#endif
         konanix::draw_frame();
         glfwPollEvents();
     }

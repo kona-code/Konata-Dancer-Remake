@@ -22,17 +22,7 @@
 
 #pragma once
 #include <vector>
-
-#ifdef _WIN32
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined (__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#else
-#define GLFW_EXPOSE_NATIVE_X11
-#endif
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include <cstdint>
 
 struct GifFrame {
     std::vector<uint8_t> rgba;
@@ -46,13 +36,13 @@ struct GifAnimation {
 };
 
 namespace konanix {
-    inline GifAnimation g_raw_anim_data;
+    inline GifAnimation gif_data;
     inline bool g_swapchain_rebuild = false;
 
     void initialize(const uint32_t &width = 1280, const uint32_t &height = 640, const bool &debug = false, const bool &resizable = false);
     void cleanup();
     void draw_frame();
-    void render();
+    void render(uint32_t custom_delay = 0);
 
     // void draw_context_menu();
     // inline VkDeviceSize image_size;

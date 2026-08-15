@@ -23,7 +23,6 @@
 #include "core.h"
 #include "konanix.h"
 #include "./util/logger.h"
-#include <GLFW/glfw3.h>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -386,7 +385,7 @@ int main(int argc, char *argv[]) {
     else iw = 640; ih = 480;
 
     logger::log("Loading animated GIF...", logger::dbg);
-    konanix::g_raw_anim_data = load_gif_animation(path);
+    konanix::gif_data = load_gif_animation(path);
     // konanix::image_size = iw*ih*STBI_rgb_alpha;
     
     try {
