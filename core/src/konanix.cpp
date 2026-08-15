@@ -2312,13 +2312,14 @@ void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug
     //create_texture_image_view(g_texture,VK_FORMAT_R8G8B8A8_SRGB,g_texture_image_view,1);
     //create_texture_sampler(g_texture_sampler);
 
-    // create_gif_image(0,globals::width, globals::height);
-
+#ifdef KONANIX_USE_IMAGE_SWAP_MECHANISM
     for (size_t i = 0; i < konanix::gif_data.frames.size(); ++i) {
         create_gif_image(konanix::gif_data.frames[i].rgba.data(), i, konanix::gif_data.width, konanix::gif_data.height);
         // logger::log("Loaded frame "+std::to_string(i),logger::dbg);
     }
-
+#else
+    create_gif_image(konanix::gif_data.frames[0].rgba.data(),0,globals::width, globals::height);
+#endif
     // konanix::gif_data.frames.clear();
 
     g_gif_sampler = create_sampler();
@@ -2467,9 +2468,24 @@ void konanix::cleanup() {
         // logger::log("<konanix> GIF image memory "+std::to_string(i)+"/"+std::to_string(gif_frames.size())+" freed up!",logger::dbg);
 
     }
+    logger::log("<konanix> GIF frames cleaned up!",logger::dbg);
+#else 
+
+    if (active_frame.image) {
+        vkDestroyImage(globals::device::device,active_frame.image,globals::allocator);
+        logger::log("<konanix> Frame image destroyed!",logger::dbg);
+    }
+ 
+    if (active_frame.image_view) {
+        vkDestroyImageView(globals::device::device,active_frame.image_view,globals::allocator);
+        logger::log("<konanix> Frame image view destroyed!",logger::dbg);
+    }
+ 
+    vkFreeMemory(globals::device::device,active_frame.image_memory,globals::allocator);
+    logger::log("<konanix> Frame image memory freed up!",logger::dbg);
+
 #endif
 
-    logger::log("<konanix> GIF frames cleaned up!",logger::dbg);
 
     if (globals::device::device) {
         vkDestroyDevice(globals::device::device,nullptr);
@@ -2500,7 +2516,6 @@ void konanix::cleanup() {
 // ---------------------------------------------------------------------------
 // command buffer helpers
 // ---------------------------------------------------------------------------
-
 
 static void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index) {
     VkCommandBufferBeginInfo begin_info{
@@ -2732,7 +2747,5 @@ void konanix::render(uint32_t custom_delay) {
         konanix::draw_frame();
         glfwPollEvents();
     }
-
-
 
 }
