@@ -21,10 +21,7 @@
 //  Copyright © 2026 konacode. All rights reserved.
 
 #pragma once
-#include <cstdint>
-#include <string>
 #include <vector>
-#include <vulkan/vulkan_core.h>
 
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -57,32 +54,14 @@ namespace konanix {
     void draw_frame();
     void render();
 
-    void create_gif_image(const unsigned char* pixels, const uint32_t &frame, uint32_t width, uint32_t height);
-    void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes);
-
-    namespace overlay {
-        inline std::vector<uint8_t> storage;
-        inline uint8_t* rgba;
-    
-        inline void clear() {
-            if (!rgba) return;
-            std::fill(storage.begin(), storage.end(), 0);
-        }
-    
-        void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-        void rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-        void stroke_rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-        void draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
-        void draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
-    };
-    void draw_context_menu();
+    // void draw_context_menu();
     // inline VkDeviceSize image_size;
     // inline void* pxdata;
-    
-    void recreate_swap_chain();
-    void create_descriptor_set();
-    void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
-
+    //
+    // void recreate_swap_chain();
+    // void create_descriptor_set();
+    // void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index);
+    //
     // VkCommandBuffer begin_single_time_commands();
     // void end_single_time_commands(VkCommandBuffer &command_buffer);
     // void copy_buffer_to_image(VkBuffer  buffer, VkImage image, const uint32_t &width, const uint32_t &height);

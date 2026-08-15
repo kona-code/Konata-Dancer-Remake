@@ -58,6 +58,22 @@
 
 using namespace konanix;
 
+namespace overlay {
+    inline std::vector<uint8_t> storage;
+    inline uint8_t* rgba;
+    
+    inline void clear() {
+    if (!rgba) return;
+        std::fill(storage.begin(), storage.end(), 0);
+    }
+    
+    void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+    void rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+    void stroke_rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+    void draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
+    void draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale = 2);
+};
+
 static constexpr short                  version[3]                      = {1, 0, 0};
 static uint32_t                         current_frame                   = 1;
 static uint32_t                         current_gif_frame               = 0;
@@ -129,7 +145,7 @@ struct QueueFamilyIndices {
 // drawing functions
 // ---------------------------------------------------------------------------
 
-void konanix::overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+void overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (x < 0 || y < 0 || x >= globals::width || y >= globals::height) return;
     size_t i = (size_t(y) * size_t(globals::width) + size_t(x)) * 4;
     float sa = a / 255.0f;
@@ -154,7 +170,7 @@ void konanix::overlay::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, 
     rgba[i + 3] = (uint8_t)(outA * 255.0f + 0.5f);
 }
 
-void konanix::overlay::rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+void overlay::rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     for (int yy = 0; yy < rh; ++yy) {
         for (int xx = 0; xx < rw; ++xx) {
             set_pixel(x + xx, y + yy, r, g, b, a);
@@ -162,7 +178,7 @@ void konanix::overlay::rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, 
     }
 }
 
-void konanix::overlay::stroke_rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+void overlay::stroke_rect(int x, int y, int rw, int rh, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     rect(x, y, rw, 1, r, g, b, a);
     rect(x, y + rh - 1, rw, 1, r, g, b, a);
     rect(x, y, 1, rh, r, g, b, a);
@@ -187,7 +203,7 @@ std::array<uint8_t, 7> glyph(char c) {
     }
 }
 
-void konanix::overlay::draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
+void overlay::draw_char(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
     c = (char)std::toupper((unsigned char)c);
     auto g7 = glyph(c);
     for (int row = 0; row < 7; ++row) {
@@ -198,7 +214,7 @@ void konanix::overlay::draw_char(int x, int y, char c, uint8_t r, uint8_t g, uin
         }
     }
 }
-void konanix::overlay::draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
+void overlay::draw_text(int x, int y, const std::string& s, uint8_t r, uint8_t g, uint8_t b, uint8_t a, int scale) {
     int cx = x;
     for (char c : s) {
         draw_char(cx, y, c, r, g, b, a, scale);
@@ -238,7 +254,7 @@ static constexpr double kPad     = 6.0;
 static ContextMenu g_menu;
 static DragState g_drag;
 
-void konanix::draw_context_menu() {
+void draw_context_menu() {
     if (!g_menu.visible) return;
 
     int x = (int)g_menu.x;
@@ -1105,7 +1121,7 @@ static void create_descriptor_pool() {
     logger::log("<konanix> Descriptor pool created!",logger::dbg);
 }
 
-void konanix::create_descriptor_set() {
+static void create_descriptor_set() {
     const static std::array<VkDescriptorSetLayout,MAX_FRAMES_IN_FLIGHT /*4*/> layouts({
             // globals::descriptor::layout,
             // globals::descriptor::layout,
@@ -1839,7 +1855,7 @@ static void copy_buffer_to_image(
     end_single_time_commands(cmd);
 }
 
-void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes) {
+static void upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t pixel_bytes) {
     VkBuffer staging_buffer = VK_NULL_HANDLE;
     VkDeviceMemory staging_memory = VK_NULL_HANDLE;
 
@@ -1885,7 +1901,7 @@ void konanix::upload_rgba_frame_to_gif_image(const uint8_t* rgba_pixels, size_t 
     vkFreeMemory(globals::device::device, staging_memory, nullptr);
 }
 
-void create_image(const uint32_t w, const uint32_t h, const VkSampleCountFlagBits samples, uint32_t mip_levels, 
+static void create_image(const uint32_t w, const uint32_t h, const VkSampleCountFlagBits samples, uint32_t mip_levels, 
                             const VkFormat format, const VkImageTiling tiling,
                             const VkImageUsageFlags usage, const VkMemoryPropertyFlags properties,
                             VkImage &image, VkDeviceMemory &memory) {
@@ -1990,7 +2006,7 @@ void transition_image_layout(VkCommandBuffer &cmd, const VkImage &image, const V
     );
 }
 
-void copy_buffer_to_image(VkCommandBuffer &cmd, const VkBuffer &buffer, const VkImage &image, const uint32_t width, const uint32_t height) {
+static void copy_buffer_to_image(VkCommandBuffer &cmd, const VkBuffer &buffer, const VkImage &image, const uint32_t width, const uint32_t height) {
     const VkBufferImageCopy region {
         .bufferOffset = 0,
         .bufferRowLength = 0,
@@ -2020,7 +2036,7 @@ void copy_buffer_to_image(VkCommandBuffer &cmd, const VkBuffer &buffer, const Vk
     );
 }
 
-void konanix::create_gif_image(const unsigned char *pixels, const uint32_t &frame, uint32_t width, uint32_t height) {
+static void create_gif_image(const unsigned char *pixels, const uint32_t &frame, uint32_t width, uint32_t height) {
     if (!pixels) {
             logger::log("<konanix> Received invalid pixels!",logger::exc);
             throw std::runtime_error("failed to load texture");
@@ -2145,7 +2161,7 @@ static void create_sync_objects() {
         }
 }
 
-void konanix::recreate_swap_chain() {
+static void recreate_swap_chain() {
     logger::log("<konanix> Recreating swap chain, waiting for device...",logger::dbg);
     vkDeviceWaitIdle(globals::device::device);
     // vkDeviceWaitIdle(globals::device);
@@ -2249,7 +2265,7 @@ void konanix::initialize(const uint32_t &w, const uint32_t &h, const bool &debug
     // create_gif_image(0,globals::width, globals::height);
 
     for (size_t i = 0; i < konanix::g_raw_anim_data.frames.size(); ++i) {
-        konanix::create_gif_image(konanix::g_raw_anim_data.frames[i].rgba.data(), i, konanix::g_raw_anim_data.width, konanix::g_raw_anim_data.height);
+        create_gif_image(konanix::g_raw_anim_data.frames[i].rgba.data(), i, konanix::g_raw_anim_data.width, konanix::g_raw_anim_data.height);
         // logger::log("Loaded frame "+std::to_string(i),logger::dbg);
     }
 
@@ -2433,7 +2449,7 @@ void konanix::cleanup() {
 // ---------------------------------------------------------------------------
 
 
-void konanix::record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index) {
+static void record_command_buffer(VkCommandBuffer commandbuffer, uint32_t image_index) {
     VkCommandBufferBeginInfo begin_info{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
