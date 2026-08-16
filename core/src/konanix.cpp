@@ -841,8 +841,11 @@ static void create_window() {
     exts = glfwGetRequiredInstanceExtensions(&n_exts);
     glfwSetWindowSize(globals::window,globals::width,globals::height);
     glfwSetFramebufferSizeCallback(globals::window,framebuffer_resize_callback);
+#ifndef KONANIX_USE_IMAGE_SWAP_MECHANISM
+    glfwSetMouseButtonCallback(globals::window, mouse_button_callback);
     glfwSetCursorPosCallback(globals::window, cursor_pos_callback);
-  
+#endif 
+
     logger::log("<konanix> Window created!",logger::dbg);
 }
 
@@ -2726,8 +2729,8 @@ void konanix::render(uint32_t custom_delay) {
 
         // set_gif_frame(current_gif_frame);
 
-        overlay::storage.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
-        overlay::rgba = overlay::storage.data();
+        // overlay::storage.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
+        // overlay::rgba = overlay::storage.data();
         // overlay::clear();
         std::vector<uint8_t> overlay_buffer;
         overlay_buffer.assign(size_t(globals::width) * size_t(globals::height) * 4, 0);
@@ -2738,8 +2741,8 @@ void konanix::render(uint32_t custom_delay) {
         const size_t copy_bytes = std::min(overlay_buffer.size(), src.size());
         memcpy(overlay_buffer.data(), src.data(), copy_bytes);
         overlay::rgba = overlay_buffer.data();
-        //
-        // draw_context_menu();
+
+        draw_context_menu();
         upload_rgba_frame_to_gif_image(overlay::rgba, overlay_buffer.size());
 
 
